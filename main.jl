@@ -118,11 +118,11 @@ end
 function (@main)(ARGS)
     mkpath( "results" );
     
-    diam_test_sphere( 2, 18, "results/2d_sphere.md" )
-    diam_test_sphere( 3, 18, "results/3d_sphere.md" )
-    diam_test_sphere( 4, 18, "results/4d_sphere.md" )
-    diam_test_sphere( 5, 18, "results/5d_sphere.md" )
-    diam_test_sphere( 6, 18, "results/6d_sphere.md" )
+    diam_test_sphere( 2, 19, "results/2d_sphere.md" )
+    diam_test_sphere( 3, 19, "results/3d_sphere.md" )
+    diam_test_sphere( 4, 19, "results/4d_sphere.md" )
+    diam_test_sphere( 5, 19, "results/5d_sphere.md" )
+    diam_test_sphere( 6, 19, "results/6d_sphere.md" )
     return  0;
 end
 
