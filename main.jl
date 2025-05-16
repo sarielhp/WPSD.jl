@@ -105,11 +105,11 @@ function  diam_test_sphere( D, iters )
         append!(df, new_row )
     end
     println( df );
-    pretty_table( df );
+    pretty_table( df, backend = Val(:markdown) );
 end
 
 function (@main)(ARGS)
-    diam_test_sphere( 3, 17 )
+    diam_test_sphere( 3, 10 )
     return  0;
 end
 
