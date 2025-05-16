@@ -21,7 +21,7 @@ package if there is interest.
 Results
 -------
 
-[2d sphere][results/2d_sphere.md]
+[2d sphere](results/2d_sphere.md)
 
 [3d sphere][results/3d_sphere.md]
 
