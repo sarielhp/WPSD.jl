@@ -1,13 +1,15 @@
-####################################################
-# main: Test all the new modules...
+#! /usr/bin/env  julia
 #
-####################################################
+# sphere_diameter.jl
+#
+# Compute the diameter of a random point set on the sphere of various
+# dimensions.
+#
 
 
 
 push!(LOAD_PATH, pwd()*"/src/")
 push!(LOAD_PATH, pwd()*"/src/cg/")
-#push!(LOAD_PATH, pwd() )
 
 using FrechetDist;
 using FrechetDist.cg;
@@ -117,7 +119,7 @@ end
 
 function (@main)(ARGS)
     mkpath( "results" );
-    
+
     diam_test_sphere( 2, 19, "results/2d_sphere.md" )
     diam_test_sphere( 3, 19, "results/3d_sphere.md" )
     diam_test_sphere( 4, 19, "results/4d_sphere.md" )

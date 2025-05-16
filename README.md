@@ -9,7 +9,7 @@ Installation
 Uses some Julia code from the Frechet distance Julia
 [implementation](https://github.com/sarielhp/FrechetDist.jl). Currently
 this is a bit of a hack - you need to create a symlink from
-FrechetDist/src/ directory to *cg*.
+FrechetDist/src/ directory to *src/cg/*.
 
 For fun, I also implemented the diameter approximation algorithm from 
 [here](https://sarielhp.org/p/00/diam.html) which is surprisingly easy
