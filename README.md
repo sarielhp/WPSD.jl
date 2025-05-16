@@ -21,10 +21,12 @@ package if there is interest.
 Results
 -------
 
-| **Dim** | **N** | **RT Approx** | **RT Exact** | **Approx** |
-|--------:|------:|--------------:|-------------:|-----------:|
-| 3       | 2     | 0.000013      | 0.000000     | 1.00       |
-| 3       | 4     | 0.000020      | 0.000000     | 1.00       |
-| 3       | 8     | 0.000013      | 0.000000     | 1.00       |
-| 3       | 16    | 0.000026      | 0.000000     | 0.98       |
-| 3       | 32    | 0.000066      | 0.000001     | 1.00       |
+[2d sphere][results/2d_sphere.md]
+
+[3d sphere][results/3d_sphere.md]
+
+[4d sphere][results/4d_sphere.md]
+
+[5d sphere][results/5d_sphere.md]
+
+[6d sphere][results/6d_sphere.md]
