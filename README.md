@@ -21,12 +21,14 @@ package if there is interest.
 Results
 -------
 
+Random points spread uniformly on a sphere in various dimensions:
+
 [2d sphere](results/2d_sphere.md)
 
-[3d sphere][results/3d_sphere.md]
+[3d sphere](results/3d_sphere.md)
 
-[4d sphere][results/4d_sphere.md]
+[4d sphere](results/4d_sphere.md)
 
-[5d sphere][results/5d_sphere.md]
+[5d sphere](results/5d_sphere.md)
 
-[6d sphere][results/6d_sphere.md]
+[6d sphere](results/6d_sphere.md)
