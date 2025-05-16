@@ -89,7 +89,7 @@ function  test_diameter( P, N::Int64, D )
 end
 
 
-function  diam_test_sphere( D, iters )
+function  diam_test_sphere( D, iters, filename )
     # Force recompilation
     begin
         P = Polygon_random_sphere( D, Float64, 40 );
@@ -102,23 +102,27 @@ function  diam_test_sphere( D, iters )
         N = 2^i
         P = Polygon_random_sphere( D, Float64, N );
         new_row = test_diameter( P, N, D );
+        #println( new_row );
         append!(df, new_row )
+        #println( df );
     end
-    println( df );
-    println( " " );
-    println( "------------------------------------------------" );
-    println( names( df) );
-    println( "------------------------------------------------" );
-    println( " " );
-    println( " " );
-             
-    pretty_table( df, header=[ "Dim", "N","RT Approx","RT Exact", "Approx"],
-        alignment=:r,
-        backend = Val(:markdown)  );
+
+    open(filename, "w") do fl
+        pretty_table( fl, df, header=[ "Dim", "N","RT Approx","RT Exact", "Approx"],
+            alignment=:r,
+            backend = Val(:markdown)  );
+    end
+    println( "Created: ", filename );
 end
 
 function (@main)(ARGS)
-    diam_test_sphere( 3, 5 )
+    mkpath( "results" );
+    
+    diam_test_sphere( 2, 18, "results/2d_sphere.md" )
+    diam_test_sphere( 3, 18, "results/3d_sphere.md" )
+    diam_test_sphere( 4, 18, "results/4d_sphere.md" )
+    diam_test_sphere( 5, 18, "results/5d_sphere.md" )
+    diam_test_sphere( 6, 18, "results/6d_sphere.md" )
     return  0;
 end
 
