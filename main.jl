@@ -13,7 +13,8 @@ using FrechetDist.cg.polygon;
 using FrechetDist.cg.point;
 using VirtArray;
 using Printf;
-
+using DataFrames
+using PrettyTables
 include( "BBT.jl" );
 include( "WSPD.jl" );
 
@@ -30,7 +31,7 @@ end
 
 function  exact_diameter( P::Polygon{D,T}  ) where {D,T}
     curr::Float64 = 0;
-    
+
     for  i ∈ 1:length(P)-1
         for j ∈ i+1:length(P)
             curr = max( curr, Dist( P[i], P[j] ) );
@@ -57,53 +58,58 @@ function  approx_diameter( P::Polygon{D,T}, ε::Float64  ) where {D,T}
     return  curr
 end
 
-function  test_diameter( N::Int64, f_silent = false )
-    P = Polygon_random( 2, Float64, N );
+function  rt_str( rt )
+    return  @sprintf( "%.6f", rt );
+end
+
+function  rt_str_2( rt )
+    return  @sprintf( "%.2f", rt );
+end
+
+function  test_diameter( P, N::Int64, D )
     mult!( P, 900.0 );
-    shift!( P, Point( 200.0, 200.0 ) );
+    shift!( P, Point{D,Float64}( 200.0, 200.0, zeros( D - 2 )... ));
 
-#    println( "----------------------------------------------" );
-#    println( "number of points ", N );
-#    println( "Approx: " );
-    t_approx = @timed approx_diam = approx_diameter( P, 0.001 );
+    t_approx = @timed approx_diam = approx_diameter( P, 0.1 );
 
-#    println( "Exact: " );
     t_exact = @timed exact_diam = exact_diameter( P );
 
-    @printf( "N: %8d  diam ≈ %10g  Exact: %10g    T≈ %10.4f  ET= %10.4f\n",
-             N, approx_diam, exact_diam, t_approx.time, t_exact.time );
-#    println( "N: ", N, " diam ≈ ", approx_diam, "  exact: ", exact_diam );
-#    println( "exact  diam: ", exact_diam );
+    @printf( "D: %d  N: %8d  diam ≈ %10g  Exact: %10g    T≈ %10.4f  ET= %10.4f\n",
+        D, N, approx_diam, exact_diam, t_approx.time, t_exact.time );
+    new_row_df = DataFrame(
+        dimension=D,
+        N=N,
+        approx_runtime=rt_str(t_approx.time),
+        exact_runtime=rt_str( t_exact.time ),
+        approx_ratio=rt_str_2( approx_diam/exact_diam )
+#        diam=exact_diam,
+    )
+
+    return  new_row_df
+end
+
+
+function  diam_test_sphere( D, iters )
+    # Force recompilation
+    begin
+        P = Polygon_random_sphere( D, Float64, 40 );
+        approx_diameter( P, 0.1 );
+        exact_diameter( P );
+    end
+
+    df = DataFrame();
+    for  i ∈ 1:iters
+        N = 2^i
+        P = Polygon_random_sphere( D, Float64, N );
+        new_row = test_diameter( P, N, D );
+        append!(df, new_row )
+    end
+    println( df );
+    pretty_table( df );
 end
 
 function (@main)(ARGS)
-    for  i ∈ 1:20
-        N = 2^i 
-        test_diameter( N );
-    end
-    exit( -1 );
-    
-    N = 400000;
-    P = Polygon_random( 2, Float64, N );
-
-    mult!( P, 900.0 );
-    shift!( P, Point( 200.0, 200.0 ) );
-
-    println( "N: ", N );
-    #W = WSPD_init( P,  0.1 );
-    #WSPD_expand( W );
-    println( "Approx: " );
-    t = @time approx_diam = approx_diameter( P, 0.1 );
-    println( "TTT: ", t );
-    println( "approx diam: ", approx_diam );
-
-    println( "Exact: " );
-    @time exact_diam = exact_diameter( P );
-    println( "exact  diam: ", exact_diam );
-
-
-    #println( "Pairs computed: ", length( W.finals ) );
-    #println( "Pairs computed: ", length( W.finals )/ (N*N) );
+    diam_test_sphere( 3, 17 )
     return  0;
 end
 
