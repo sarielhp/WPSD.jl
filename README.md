@@ -7,7 +7,7 @@ approximating the diameter of a point set.
 Installation
 ------------
 Uses some Julia code from the Frechet distance Julia
-[Implementation](https://github.com/sarielhp/FrechetDist.jl). Currently
+[implementation](https://github.com/sarielhp/FrechetDist.jl). Currently
 this is a bit of a hack - you need to create a symlink from
 FrechetDist/src/ directory to *cg*.
 
@@ -18,10 +18,12 @@ For fun, I also implemented the diameter approximation algorithm from
 This is currently a bit of hack. I would release it as an official
 package if there is interest.
 
-Results
+Results for approximate diameter 
 -------
 
-Random points spread uniformly on a sphere in various dimensions:
+
+Random points spread uniformly on a sphere in various dimensions. The
+preset approximation ratio is 1.1 (but the result are much better, so...):
 
 [2d sphere](results/2d_sphere.md)
 
