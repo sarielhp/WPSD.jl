@@ -56,8 +56,8 @@ function  approx_shortcut( P::Polygon{D,T}, ε::Float64  ) where {D,T}
 
         quality = l / d
         if quality > max_quality
-            p_i = l_i;
-            q_i = r_i;
+            p_i = min( l_i, r_i);
+            q_i = max( l_i, r_i );
             max_quality = quality
         end
     end
@@ -75,23 +75,28 @@ function (@main)(ARGS)
     eps =  parse(Float64, ARGS[ 1  ] );
     P = read_file( ARGS[ 2 ] );
 
+    P = Polygon_sample_uniformly( P, 1000 );
     println( "N = ", length( P ) );
     approx_shortcut( P, 1.0 );
-    println( "First compilation completed..." );
-    t = @timed  i,j,quality = approx_shortcut( P, eps );
-    println( "Time: ", t.time );
-
-    println( i, "   ", j );
-    println( "Quality: ", quality );
-    println( P[i ] );
-
-    println( P[j ] );
-
-    shortcut = Polygon2F()
-    push!( shortcut, P[ i ], P[j] );
-
     list = VecPolygon2F();
-    push!( list, P, shortcut );
+    for  i ∈ 1:40
+        push!( list, P );
+        t = @timed  v_i,v_j,quality = approx_shortcut( P, eps );
+        println( i, " : ", quality );
+        if  ( quality < 1.250 )
+            break;
+        end
+        println( v_i, "..", v_j, " :   Time: ", t.time );
+        P = Polygon_shortcut( P, v_i, v_j );
+    end
+    
+    #println( i, "   ", j );
+    #println( "Quality: ", quality );
+
+    #shortcut = Polygon2F()
+    #push!( shortcut, P[ i ], P[j] );
+
+    #push!( list, P, shortcut );
 
     bb = BBox2F();
     BBox_bound( bb, P );
