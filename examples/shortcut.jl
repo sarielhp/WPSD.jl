@@ -19,8 +19,8 @@ using PrettyTables
 
 include( "graphics.jl" )
 
-using BBT
-using WSPD
+import BBT
+import WSPD
 using Cairo, Colors
 
 
@@ -34,7 +34,7 @@ end
 
 function  approx_shortcut( P::Polygon{D,T}, ε::Float64  ) where {D,T}
     @assert( length( P ) > 1 );
-    
+
     if  length( P ) <= 1
         return  0.0
     end
@@ -42,13 +42,16 @@ function  approx_shortcut( P::Polygon{D,T}, ε::Float64  ) where {D,T}
     plens = Polygon_prefix_lengths( P );
 
     c = 1.0 + ε;
-    W = WSPD_init( P,  ε / 2  );
-    WSPD_expand( W );
+    W = WSPD.init( P,  ε / 2  );
+    WSPD.expand( W );
 
     max_quality = -1.0;
     p_i = q_i = 1;
     for  pair ∈ W.finals
-        l_i,r_i = WSPD_reps_orig_indexes( W, pair );
+        #i_min = WSPD.min_orig_index( W, pair );
+        #i_max = WSPD.max_orig_index( W, pair );
+        l_i,r_i = WSPD.reps_orig_indexes( W, pair );
+        #println( "M: ", i_min, "/", i_max, "   ", l_i, "/", r_i );
         l = abs( plens[ l_i ] - plens[ r_i ] )
         d = Dist( P[ l_i ], P[ r_i ] );
 
@@ -61,19 +64,56 @@ function  approx_shortcut( P::Polygon{D,T}, ε::Float64  ) where {D,T}
             max_quality = quality
         end
     end
-    
+
     return  p_i, q_i, max_quality;
 end
 
-function (@main)(ARGS)
-    if  length( ARGS ) != 2
-        println( "Usage:\n\t"
-                 * "shortcut.jl [eps] [file.txt]\n\n" );
-        return  -1;
+
+function  approx_bichromatic_shortcut( P::Polygon{D,T},
+                                       prefix::Int,
+                                       ε::Float64, min_quality::Float64 ) where {D,T}
+    @assert( length( P ) > 1 );
+
+    if  length( P ) <= 1
+        return  1,1,1.0
     end
-#    println( ARGS[ 1 ] );
-    eps =  parse(Float64, ARGS[ 1  ] );
-    P = read_file( ARGS[ 2 ] );
+
+    plens = Polygon_prefix_lengths( P );
+
+    c = 1.0 + ε;
+    W = WSPD.init( P,  ε / 2  );
+    WSPD.expand_bichromatic( W, prefix );
+
+    max_quality = -1.0;
+    p_i = q_i = length( P ) + 1;
+    for  pair ∈ W.finals
+        i_min = WSPD.min_orig_index( W, pair );
+        i_max = WSPD.max_orig_index( W, pair );
+        if   ( ( i_min > prefix )  ||  ( i_max <= prefix ) )
+            continue
+        end
+        #l_i,r_i = WSPD.reps_orig_indexes( W, pair );
+        #println( "M: ", i_min, "/", i_max, "   ", l_i, "/", r_i );
+        l = abs( plens[ i_max ] - plens[ i_min ] )
+        d = Dist( P[ i_max ], P[ i_min ] );
+
+        if  d == 0.0   continue  end
+
+        quality = l / d
+        if quality > min_quality
+            if  ( i_min < p_i )
+                p_i = i_min;
+                q_i = i_max;
+                max_quality = quality;
+            end
+        end
+    end
+
+    return  p_i, q_i, max_quality;
+end
+
+
+function repeated_shortcut( P );
 
     P = Polygon_sample_uniformly( P, 1000 );
     println( "N = ", length( P ) );
@@ -87,9 +127,9 @@ function (@main)(ARGS)
             break;
         end
         println( v_i, "..", v_j, " :   Time: ", t.time );
-        P = Polygon_shortcut( P, v_i, v_j );
+        P = polygon.shortcut( P, v_i, v_j );
     end
-    
+
     #println( i, "   ", j );
     #println( "Quality: ", quality );
 
@@ -108,11 +148,61 @@ function (@main)(ARGS)
     end
 
     output_polygons_to_file( list, "curves.pdf", true );
+end
 
+function  make_straight( P::Polygon{D,T}, quality, ε ) where{D,T}
+    if  length( P ) <= 2
+        return  P
+    end
+    if  length( P ) == 3
+        q = total_length( P ) / Dist( P[1], P[3] )
+        if   ( q <= quality )
+            return  P
+        end
+        return  ( Polygon{D,T}() |> P[1] |> P[3] );
+    end
+
+    ℓ = length( P );
+    mid::Int = round( Int,  ℓ / 2 );
+
+    PL = cut( P, 1:mid );
+    PR = cut( P, mid+1:ℓ )
+
+    QL = make_straight( PL, quality, ε );
+    QR = make_straight( PR, quality, ε );
+    prefix = length( QL ) ;
+    Q = polygon.append_smart!( QL, QR );
+
+    # Now we look for a good enough shortcut between the two parts.
+    p_i, q_i, qlt = approx_bichromatic_shortcut( Q, prefix, ε, quality );
+    println( "qlt: ", qlt );
+    println( "shortcut: [",p_i, ":",  q_i, "]" );
+    if  qlt > quality
+        println( "Bingo!" );
+        Q = polygon.shortcut( Q, p_i, q_i );
+    end
+
+    return  Q;
+end
+
+function (@main)(ARGS)
+    if  length( ARGS ) != 2
+        println( "Usage:\n\t"
+                 * "shortcut.jl [eps] [file.txt]\n\n" );
+        return  -1;
+    end
+
+    list = VecPolygon2F();
+    ε =  parse(Float64, ARGS[ 1  ] );
+    P = read_file( ARGS[ 2 ] );
+
+    push!( list, deepcopy( P ) );
+    Q = make_straight( P, 3.0, ε );
+
+    push!( list, Q );
+
+    output_polygons_to_file( list, "curves.pdf", true );
     
-#    @printf( "%.6f-approx shortcut: %15.6f   Time: %11.6f    N: %7d\n",
-#             eps, diam, t.time, length( P ) );
-#    println( eps"-approx diameter: ", diam,  " time: " );
     return  0;
 end
 

@@ -14,12 +14,12 @@ using Cairo, Colors
 #include("./VirtArray.jl")
 #include("./BBT.jl")
 
-using BBT
+import BBT
 using DataStructures
 
 mutable struct WSPair{D,T}
-    left::BBTNode
-    right::BBTNode
+    left::BBT.Node
+    right::BBT.Node
 
     dist::T # Distance between the boxes.
     max_sides_diam::T
@@ -27,7 +27,7 @@ mutable struct WSPair{D,T}
                 # points in this pair.
 end
 
-function  WPDPair_init( left::BBTNode{D,T}, right::BBTNode{D,T} )  where {D,T}
+function  WPDPair_init( left::BBT.Node{D,T}, right::BBT.Node{D,T} )  where {D,T}
     @assert( !isnothing( left ) );
     @assert( !isnothing( right ) );
 
@@ -71,13 +71,13 @@ mutable struct PD{D,T}
     finals::Vector{WSPair{D,T}};
     curr_active::Vector{WSPair{D,T}};
     heap::BinaryHeap{WSPair{D,T}};
-    tree::BBTree{D,T}
+    tree::BBT.Tree{D,T}
     sep::T;  # Desired quality of separation
     hash_pairs::Dict{PairInt, Bool};
 end
 
 
-@inline function  get_id( u::BBTNode, v::BBTNode )::PairInt
+@inline function  get_id( u::BBT.Node, v::BBT.Node )::PairInt
     x, y = u.id, v.id;
 
     x = min( u.id, v.id );
@@ -92,7 +92,7 @@ end
 end
 
 
-function  push_pair( W::PD{D,T}, u::BBTNode{D,T}, v::BBTNode{D,T}
+function  push_pair( W::PD{D,T}, u::BBT.Node{D,T}, v::BBT.Node{D,T}
                    ) where {D,T}
     id = get_id( u, v );
     if  has_pair( W, id )
@@ -109,16 +109,16 @@ function  push_pair( W::PD{D,T}, u::BBTNode{D,T}, v::BBTNode{D,T}
 end
 
 """
-    WSPD_top_refine
+    top_refine
 
     Takes the top of the active pairs, and refine it.
 """
-function  WSPD_top_refine( W::PD{D,T} ) where {D,T}
+function  top_refine( W::PD{D,T} ) where {D,T}
     if ( isempty( W.heap ) ) return  end
 
     top = pop!( W.heap );
-    BBTree_refine_node( W.tree, top.left );
-    BBTree_refine_node( W.tree, top.right );
+    BBT.Tree_refine_node( W.tree, top.left );
+    BBT.Tree_refine_node( W.tree, top.right );
 
     l_diam = BBox_diam( top.left.bb );
     r_diam = BBox_diam( top.right.bb );
@@ -142,11 +142,11 @@ end
 
 
 """
-    WSPD_top_delete
+    top_delete
 
     Takes the top of the active pairs, and deletes it.
 """
-function  WSPD_top_delete( W::PD{D,T} )  where{D,T}
+function  top_delete( W::PD{D,T} )  where{D,T}
     if ( isempty( active ) ) return  end
 
     top = pop!( W.heap );
@@ -154,19 +154,19 @@ end
 
 
 """
-    WSPD_top_finalize
+    top_finalize
 
 Takes the top of the active pairs, and move it to the generated list of pairs.
 """
-function  WSPD_top_finalize( W::PD{D,T} )  where  {D,T}
+function  top_finalize( W::PD{D,T} )  where  {D,T}
     if ( isempty( W.heap ) ) return  end
     top = pop!( W.heap );
     push!( W.finals, top );
 end
 
 
-function  WSPD_init( _pnts::Polygon{D,T}, _sep::T ) where {D,T}
-    tree = BBTree_init( _pnts );
+function  init( _pnts::Polygon{D,T}, _sep::T ) where {D,T}
+    tree = BBT.Tree_init( _pnts );
 
     PairT = WSPair{D,T}
     #order = Base.Order.ForwardOrdering{PairT}( compare_pairs );
@@ -186,27 +186,57 @@ function  WSPD_init( _pnts::Polygon{D,T}, _sep::T ) where {D,T}
 end
 
 
-function   WSPD_expand( W::PD{D,T} ) where {D,T}
+function   expand( W::PD{D,T} ) where {D,T}
     while  ( !isempty( W.heap ) )
         top = first( W.heap );
         #println( "    Δ: ", top.max_diam, "    [", separation( top ), "]:",
         #    length( W.finals ) );
         if  ( separation( top ) > W.sep )
-            WSPD_top_refine( W );
+            top_refine( W );
             continue;
         end
         #println( top.left.r, " × ", top.right.r );
-        WSPD_top_finalize( W );
+        top_finalize( W );
     end
 end
 
-function   WSPD_get_top( W::PD{D,T} ) where {D,T}
+"""
+     expand_bichromatic
+
+expand pairs, but only if they are not fully contained either in
+1:index_cut range or the index_cut+1:end range.  in the original
+array. Gives an easy way to get WSPD for bichromatic pairs.
+
+"""
+function   expand_bichromatic( W::PD{D,T}, index_cut ) where {D,T}
+    while  ( !isempty( W.heap ) )
+        top = first( W.heap );
+
+        i_min = min_orig_index( W, top );
+        i_max = max_orig_index( W, top );
+        f_boring = ( ( ( i_min <= index_cut )  &&  (i_max <= index_cut ) )
+                     || ( ( i_min > index_cut )  &&  (i_max > index_cut ) ) );
+        if   f_boring
+            pop!( W.heap );
+            continue;
+        end
+
+        if  ( separation( top ) > W.sep )
+            top_refine( W );
+            continue;
+        end
+        #println( top.left.r, " × ", top.right.r );
+        top_finalize( W );
+    end
+end
+
+function   get_top( W::PD{D,T} ) where {D,T}
     @assert( ! isempty( W.heap ) );
 
     return  first( W.heap );
 end
 
-function   WSPD_top_diam_ub( W::PD{D,T} ) where {D,T}
+function   top_diam_ub( W::PD{D,T} ) where {D,T}
     @assert( ! isempty( W.heap ) );
     if isempty( W.heap )
         return  zero( T );
@@ -215,13 +245,13 @@ function   WSPD_top_diam_ub( W::PD{D,T} ) where {D,T}
     return  first( W.heap ).diam_ub;
 end
 
-function  WSPD_get_reps( W::PD{D,T}, pair::WSPair{D,T} ) where {D,T}
+function  get_reps( W::PD{D,T}, pair::WSPair{D,T} ) where {D,T}
     @assert( ! isempty( pair.left.r ) )
     @assert( ! isempty( pair.right.r ) )
     return  W.tree.PS[ first( pair.left.r ) ], W.tree.PS[ first( pair.right.r ) ]
 end
 
-function  WSPD_reps_orig_indexes( W::PD{D,T}, pair::WSPair{D,T} ) where {D,T}
+function  reps_orig_indexes( W::PD{D,T}, pair::WSPair{D,T} ) where {D,T}
     @assert( ! isempty( pair.left.r ) )
     @assert( ! isempty( pair.right.r ) )
 
@@ -235,18 +265,41 @@ function  WSPD_reps_orig_indexes( W::PD{D,T}, pair::WSPair{D,T} ) where {D,T}
 end
 
 
+function  min_orig_index( W::PD{D,T}, pair::WSPair{D,T} ) where {D,T}
+    @assert( ! isempty( pair.left.r ) )
+    @assert( ! isempty( pair.right.r ) )
+
+    return  min( BBT.get_min_index( W.tree, pair.left ),
+                 BBT.get_min_index( W.tree, pair.right ) );
+end
+
+function  max_orig_index( W::PD{D,T}, pair::WSPair{D,T} ) where {D,T}
+    @assert( ! isempty( pair.left.r ) )
+    @assert( ! isempty( pair.right.r ) )
+
+    return  max( BBT.get_max_index( W.tree, pair.left ),
+                 BBT.get_max_index( W.tree, pair.right ) );
+end
+
+
 ### The exports...
 
 export WPD
 export WPDPair
 
-export WSPD_top_delete, WSPD_top_finalize, WSPD_top_delete
-export WSPD_expand, WSPD_init;
+export top_delete, top_finalize, top_delete
+export expand, init;
 
-export WSPD_top_diam_ub
-export WSPD_get_top
-export WSPD_top_refine
+export expand_bichromatic
 
-export WSPD_get_reps
-export WSPD_reps_orig_indexes 
+export top_diam_ub
+export get_top
+export top_refine
+
+export get_reps
+export reps_orig_indexes
+
+export min_orig_index
+export max_orig_index
+
 end

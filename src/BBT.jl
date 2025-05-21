@@ -22,46 +22,121 @@ using Cairo, Colors
 #using Base: reindex
 IntRange = UnitRange{Int};
 
-mutable struct BBTNode{D,T}
+mutable struct Node{D,T}
     bb::BBox{D,T}
     r::IntRange
-    left::Union{Nothing, BBTNode}
-    right::Union{Nothing, BBTNode}
+    left::Union{Nothing, Node}
+    right::Union{Nothing, Node}
     f_leaf::Bool;
     diam::T;
     id::Int
+    min_index::Union{Nothing, Int}
+    max_index::Union{Nothing, Int}
 end
 
-mutable struct BBTree{D,T}
+mutable struct Tree{D,T}
     PS::VArray{Point{D,T}};
-    root::Union{Nothing, BBTNode}
+    root::Union{Nothing, Node}
     id_counter::Int
 end
 
 ########################################################################
 
-function  node_init( tree::BBTree{D,T}, range::IntRange )  where {D,T}
+
+function  get_min_max_index( tree::Tree, node::Node,
+    min_max, field_name::Symbol )::Int
+
+    if  ! isnothing( getfield( node, field_name ) )
+        return  getfield( node, field_name );
+    end
+    if   node.f_leaf
+        setfield!( node, field_name,  orig_index( tree.PS, first( node.r ) ) );
+        return  getfield( node, field_name );
+    end
+
+    # We could potentially expand the node, and then use the
+    # following, but this seems somewhat wasteful. For the time being,
+    # if we reached a current un-expanded node, we just compute the
+    # minimum using brute force.
+
+    # node_expand( node, tree );
+
+    if  ( ( ! isnothing( node.left ) )  &&  ( ! isnothing( node.right ) ) )
+        v_l = get_min_max_index( tree, node.left, min_max, field_name );
+        v_r = get_min_max_index( tree, node.right, min_max, field_name ) 
+        val = min_max( [ v_l v_r ] );
+    else
+        val = min_max( [orig_index( tree.PS, i ) for i ∈ node.r] )
+    end
+        
+    setfield!( node, field_name, val );
+    return  getfield( node, field_name );
+end
+
+
+function  get_min_index( tree::Tree, node::Node )::Int
+    return  get_min_max_index( tree, node, minimum, :min_index );
+end
+
+function  get_max_index( tree::Tree, node::Node )::Int
+    return  get_min_max_index( tree, node, maximum, :max_index );
+end
+
+    #=
+function  Node_get_min_index_old( tree::Tree, node::Node )::Int
+    if  ! isnothing( node.min_index )
+        return  node.min_index
+    end
+    if   node.f_leaf
+        node.min_index = orig_index( tree.P, first( r ) );
+        return  node.min_index;
+    end
+
+    # We could potentially expand the node, and then use the
+    # following, but this seems somewhat wasteful. For the time being,
+    # if we reached a current un-expanded node, we just compute the
+    # minimum using brute force.
+
+    # node_expand( node, tree );
+
+    if  ( ( ! isnothing( node.left ) )  &&  ( ! isnothing( node.right ) ) )
+        node.min_index = minimum( [Node_get_min_index( tree, node.left ),
+                                   Node_get_min_index( tree, node.right ) ] );
+        return  node.min_index;
+    end
+
+    node.min_index = minimum( [orig_index( tree.P, i ) for i ∈ r] );
+
+    return  node.min_index;
+end
+
+=#
+
+
+
+
+function  node_init( tree::Tree{D,T}, range::IntRange )  where {D,T}
     bb = BBox{D,T}();
     tree.id_counter += 1;
 
     #println( "NID: ", tree.id_counter );
     BBox_bound( bb, tree.PS[ range ] );
-    return  BBTNode( bb, range, nothing, nothing, false, BBox_diam( bb ),
-                     tree.id_counter );
+    return  Node( bb, range, nothing, nothing, false, BBox_diam( bb ),
+                     tree.id_counter, nothing, nothing );
 end
 
-function  BBTree_init_inner( p::Polygon{D,T} )::BBTree{D,T} where {D,T}
+function  Tree_init_inner( p::Polygon{D,T} )::Tree{D,T} where {D,T}
     varr = VArray( Points( p ) );
-    tree = BBTree( varr, nothing, 0 );
+    tree = Tree( varr, nothing, 0 );
 
     tree.root = node_init( tree, 1:length(p) );
 
     return  tree;
 end
 
-function  BBTree_init_inner( _p::Vector{Point{D,T}} )::BBTree{D,T} where {D,T}
+function  Tree_init_inner( _p::Vector{Point{D,T}} )::Tree{D,T} where {D,T}
     p = Polygon{D,T}( _p );
-    return  BBTree_init_inner( p );
+    return  Tree_init_inner( p );
 end
 
 
@@ -98,7 +173,7 @@ function pnt_varray_partition!( P::VArray{Point{D,T}}, r::IntRange,
 end
 
 
-function  node_split( node::BBTNode{D,T}, tree::BBTree{D,T} )  where {D,T}
+function  node_split( node::Node{D,T}, tree::Tree{D,T} )  where {D,T}
     if  ( ( ! isnothing( node.left ) )  &&  ( ! isnothing( node.right ) ) )
         #println( "Already split?" );
         return;
@@ -127,12 +202,12 @@ function  node_split( node::BBTNode{D,T}, tree::BBTree{D,T} )  where {D,T}
     node.right = node_init( tree, r_r );
     #println( "L NID: ", node.left.id )
     #println( "R NID: ", node.right.id )
-    
+
     return  node;
 end
 
 
-function  node_expand( v::BBTNode{D,T}, tree::BBTree{D,T} ) where {D,T}
+function  node_expand( v::Node{D,T}, tree::Tree{D,T} ) where {D,T}
     v.f_leaf  &&  return;
 
     node_split( v, tree );
@@ -143,8 +218,8 @@ function  node_expand( v::BBTNode{D,T}, tree::BBTree{D,T} ) where {D,T}
 #    ( v.right != nothing )  &&  node_expand( v.right, tree );
 end
 
-function BBTree_init( PS::Polygon{D,T} )::BBTree{D,T} where {D,T}
-    tree = BBTree_init_inner( PS );
+function Tree_init( PS::Polygon{D,T} )::Tree{D,T} where {D,T}
+    tree = Tree_init_inner( PS );
 
     #println( typeof( tree ) );
     #println( "tree created" );
@@ -154,7 +229,7 @@ function BBTree_init( PS::Polygon{D,T} )::BBTree{D,T} where {D,T}
     return  tree;
 end
 
-function  fully_expand( node::BBTNode{D,T}, tree::BBTree{D,T} ) where {D,T}
+function  fully_expand( node::Node{D,T}, tree::Tree{D,T} ) where {D,T}
     if   node.f_leaf  return  end;
 
     if ( isnothing( node.left )  ||  isnothing( node.right ) )
@@ -169,7 +244,7 @@ function  fully_expand( node::BBTNode{D,T}, tree::BBTree{D,T} ) where {D,T}
     end
 end
 
-function  BBTree_fully_expand( tree::BBTree{D,T} ) where {D,T}
+function  Tree_fully_expand( tree::Tree{D,T} ) where {D,T}
     fully_expand( tree.root, tree );
 end
 
@@ -217,14 +292,14 @@ function   node_draw( context, node, level, range )
     end
 end
 
-function  depth( node::BBTNode{D,T} )::Int where  {D,T}
+function  depth( node::Node{D,T} )::Int where  {D,T}
     if  ( isnothing( node ) )  return  0  end;
     if  node.f_leaf  return 1 end;
 
     return 1 + max(  depth( node.left ), depth( node.right ) )
 end
 
-function BBTree_draw( tree::BBTree{D,T}, filename::String ) where{D,T}
+function Tree_draw( tree::Tree{D,T}, filename::String ) where{D,T}
     bb = BBox_expand( tree.root.bb, 1.3 );
     #BBox_print( bb );
 
@@ -253,16 +328,18 @@ function BBTree_draw( tree::BBTree{D,T}, filename::String ) where{D,T}
 end
 
 
-function  BBTree_refine_node( tree, node )
+function  Tree_refine_node( tree, node )
     node_split( node, tree );
 end
 
 # Export list...
 
-export  BBTNode,  BBTree;
-export  BBTree_draw, BBTree_init, BBTree_fully_expand
-export  BBTree_refine_node
+export  Node,  Tree;
+export  Tree_draw, Tree_init, Tree_fully_expand
+export  Tree_refine_node
 
+export   get_min_index;
+export   get_max_index;
 
 end  # Module
 ####################################################################3
