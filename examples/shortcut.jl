@@ -159,7 +159,10 @@ function  make_straight( P::Polygon{D,T}, quality, ε ) where{D,T}
         if   ( q <= quality )
             return  P
         end
-        return  ( Polygon{D,T}() |> P[1] |> P[3] );
+        Q = Polygon{D,T}() ;
+        push!( Q, P[1], P[3] );
+
+        return  Q;
     end
 
     ℓ = length( P );
@@ -175,10 +178,10 @@ function  make_straight( P::Polygon{D,T}, quality, ε ) where{D,T}
 
     # Now we look for a good enough shortcut between the two parts.
     p_i, q_i, qlt = approx_bichromatic_shortcut( Q, prefix, ε, quality );
-    println( "qlt: ", qlt );
-    println( "shortcut: [",p_i, ":",  q_i, "]" );
+    #println( "qlt: ", qlt );
+    #println( "shortcut: [",p_i, ":",  q_i, "]" );
     if  qlt > quality
-        println( "Bingo!" );
+        #println( "Bingo!" );
         Q = polygon.shortcut( Q, p_i, q_i );
     end
 
@@ -196,13 +199,61 @@ function (@main)(ARGS)
     ε =  parse(Float64, ARGS[ 1  ] );
     P = read_file( ARGS[ 2 ] );
 
+
+    println( "N = ", length( P ) );
     push!( list, deepcopy( P ) );
-    Q = make_straight( P, 3.0, ε );
 
-    push!( list, Q );
+    P_simp_10, _ = frechet_simplify_to_cardin( P, 10 );
+    P_simp_30, _ = frechet_simplify_to_cardin( P, 30 );
 
-    output_polygons_to_file( list, "curves.pdf", true );
-    
+    Q_800 = make_straight( P, 800.0, ε );
+    push!( list, Q_800 );
+    Q_400 = make_straight( P, 400.0, ε );
+    push!( list, Q_400 );
+    Q_200 = make_straight( P, 200.0, ε );
+    push!( list, Q_200 );
+    Q_100 = make_straight( P, 100.0, ε );
+    push!( list, Q_100 );
+    Q_50 = make_straight( P, 50.0, ε );
+    push!( list, Q_50 );
+    Q_25 = make_straight( P, 25.0, ε );
+    push!( list, Q_25 );
+    Q_10 = make_straight( P, 10.0, ε );
+    push!( list, Q_10 );
+    Q_2 = make_straight( P, 2.0, ε );
+    push!( list, Q_2 );
+
+    output_polygons_to_file( list, "curves_all.pdf", true );
+
+    c,cr,bb = cairo_setup( "curves.pdf", VecPolygon2F( [P] ), true  );
+
+    output_polygons( cr,bb, [P], false, false, 3.0, "Input: "*string(length(P)) );
+    Cairo.show_page( cr )
+
+    output_polygons( cr,bb, [P, Q_800], false, false, 3.0, "Straightness: 800" );
+    Cairo.show_page( cr )
+    output_polygons( cr,bb, [P, Q_400], false, false, 3.0, "Straightness: 400" );
+    Cairo.show_page( cr )
+    output_polygons( cr,bb, [P, Q_200], false, false, 3.0, "Straightness: 200" );
+    Cairo.show_page( cr )
+    output_polygons( cr,bb, [P, Q_100], false, false, 3.0, "Straightness: 100" );
+    Cairo.show_page( cr )
+    output_polygons( cr,bb, [P, Q_50], false, false, 3.0, "Straightness: 50" );
+    Cairo.show_page( cr )
+    output_polygons( cr,bb, [P, Q_25], false, false, 3.0, "Straightness: 25" );
+    Cairo.show_page( cr )
+    output_polygons( cr,bb, [P, Q_10], false, false, 3.0, "Straightness: 10" );
+    Cairo.show_page( cr )
+    output_polygons( cr,bb, [P, Q_2], false, false, 3.0, "Straightness: 2" );
+    Cairo.show_page( cr )
+
+    output_polygons( cr,bb, [P, P_simp_10], false, false, 3.0, "Frechet simp 10" );
+    Cairo.show_page( cr )
+    output_polygons( cr,bb, [P, P_simp_30], false, false, 3.0, "Frechet simp 30" );
+    Cairo.show_page( cr )
+
+    Cairo.finish(c);
+
     return  0;
 end
 
