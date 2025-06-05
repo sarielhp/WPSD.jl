@@ -186,6 +186,12 @@ function  init( _pnts::Polygon{D,T}, _sep::T ) where {D,T}
 end
 
 
+"""
+    expand( W )
+
+Construct the whole WSPD.
+
+"""
 function   expand( W::PD{D,T} ) where {D,T}
     while  ( !isempty( W.heap ) )
         top = first( W.heap );
