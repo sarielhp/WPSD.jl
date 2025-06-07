@@ -56,6 +56,8 @@ mutable struct GridType{D,T}
     cp::Tuple{Int, Int};
     cp_dist::T;
     f_regrid::Bool
+
+    one::Point{D,Int}  # A vector filled with ones, oh yeh!
 end
 
 
@@ -79,7 +81,8 @@ function   grid_init( P::Vector{Point{D,T}}, ℓ::T,
 
     dict = Dict{Point{D,Int},Vector{Int}}();
     sizehint!( dict, min( length( r ), length( P ) ) )
-    G = GridType( P, ℓ, dict, cp, ℓ, false );
+    G = GridType( P, ℓ, dict, cp, ℓ, false,
+                  Point{D,Int}( fill( 1, D ) ) );
 
     for  i ∈ r
         add_value!( G.cells, gid( P[ i ], ℓ ), i );
@@ -91,9 +94,8 @@ end
 function  closest_pair_add_point( G::GridType{D,T}, loc::Int ) where{D,T}
     p =  G.P[ loc ];
     id = gid( p, G.ℓ )
-    v = Point{D,Int}( fill( 1, D ) );
-    id_min = sub( id, v );
-    id_max = add( id, v );
+    id_min = sub( id, G.one );
+    id_max = add( id, G.one );
 
     #println( "CPAP: ", loc );
     P = G.P;
@@ -101,7 +103,7 @@ function  closest_pair_add_point( G::GridType{D,T}, loc::Int ) where{D,T}
     min_ind = -1;
     min_dist = G.cp_dist;
     for  cell ∈ CartesianIndex( id_min... ):CartesianIndex( id_max... )
-        i = Point{D,Int}( collect(Tuple( cell ) ) );
+        i = Point{D,Int}( Tuple( cell )... );
         #println( typeof( i ) )
         if  ! haskey( G.cells, i )  continue  end
         list = G.cells[ i ];
@@ -456,7 +458,7 @@ function  CL_closest_pair( P::Vector{Point{D,T}} ) where{D,T}
     #=
     sq = round( Int, sqrt( length( P ) ) )
     for  i  ∈ 1:sq-1
-        p = P[ i ] 
+        p = P[ i ]
         for  j  ∈ i+1:sq+1
             ℓ = Dist( p, P[ j ] )
             if   ℓ < d
@@ -466,7 +468,7 @@ function  CL_closest_pair( P::Vector{Point{D,T}} ) where{D,T}
         end
     end
     =#
-    
+
     #println( "d: ", d );
     cells = Dict{Point{D,Int},Int}();
     sizehint!( cells, min( 1024, length( P ) ) );
@@ -693,7 +695,9 @@ function (@main)(ARGS)
     force_compile();
 
     println( "\n\n--------------------\n\n" );
-    P = Polygon_random( D,Float64, n );
+    println( "Generating input..." );
+    @time P = Polygon_random( D,Float64, n );
+    println( "Done. Copying:" );
 
     PB = deepcopy( Points( P ) );
     PC = deepcopy( Points( P ) );
@@ -701,17 +705,22 @@ function (@main)(ARGS)
     PE = deepcopy( Points( P ) );
     PF = deepcopy( Points( P ) );
 
-    t_CL_rand = @timed CL_G   = CL_closest_pair( PB );
-    t_OH_rand = @timed OH_G   = OH_closest_pair( PC );
-    t_dc      = @timed sol    = closest_pair_dc( PD );
-    #t_bf      = @timed sol_bf = closest_pair_brute_force( PE );
-    t_rand    = @timed G      = closest_pair( PF );
+    println( "Done copying." );
 
-    @printf( "Time D&C           : %10.5f\n", t_dc.time );
-    #@printf( "Time Brute force   : %10.5f\n", t_bf.time );
+    t_rand    = @timed G      = closest_pair( PF );
     @printf( "Time Rand          : %10.5f\n", t_rand.time );
-    @printf( "Time Rand (OH)     : %10.5f\n", t_OH_rand.time );
+
+    t_CL_rand = @timed CL_G   = CL_closest_pair( PB );
     @printf( "Time Rand (CL)     : %10.5f\n", t_CL_rand.time );
+
+    t_OH_rand = @timed OH_G   = OH_closest_pair( PC );
+    @printf( "Time Rand (OH)     : %10.5f\n", t_OH_rand.time );
+
+    t_dc      = @timed sol    = closest_pair_dc( PD );
+    @printf( "Time D&C           : %10.5f\n", t_dc.time );
+    #t_bf      = @timed sol_bf = closest_pair_brute_force( PE );
+
+    #@printf( "Time Brute force   : %10.5f\n", t_bf.time );
     println( "Distance                            : ", sol.d );
 
     str = @sprintf( "%12d,  %11.6f, %11.6f, %11.6f, %11.6f\n",
