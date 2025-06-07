@@ -427,9 +427,15 @@ function  CL_closest_pair( P::Vector{Point{D,T}} ) where{D,T}
 
     cells = Dict{Point{D,Int},Int}();
     sizehint!( cells, 4*length( P ) );
+#    println( "len P: ", length( P ) );
+#    println( length( cells.slots ) );
+#    println( length( cells.keys ) );
 
+#    exit( -1 );
+    
     lists = zeros(Int, (2+length( P )) * CL_MAX_SIZE )
 
+    
     G = CL_grid_init( P, d, cells, lists, 1:2, (1,2) );
     for  i ∈ 3:length( P )
         CL_cp_add_point( G, i );
