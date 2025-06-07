@@ -338,6 +338,8 @@ end
     if ! haskey( G.cells, key )
         loc = G.lists_pos
         G.lists_pos += CL_MAX_SIZE;
+        #println( key, " hash: ", hash( key ) );
+        #println( key, " hash: ", hash( key ) );
         G.cells[ key ] = loc;
     else
         loc = G.cells[ key ];
@@ -347,7 +349,7 @@ end
         loc += 1
     end
     G.lists[ loc ] = value;
-    if  ( loc - start ) > ( CL_MAX_SIZE - 1 )
+    if  ( loc - start ) > ( CL_MAX_SIZE - 2 )
         G.f_regrid = true;
     end
 end
@@ -367,8 +369,17 @@ function   CL_grid_init( P::Vector{Point{D,T}}, ℓ::T,
     end
     =#
     #@time
+    #println( "CL_grid_init" );
     fill!( _lists, zero( Int ) );
-    empty!( _cells );
+    #empty!( _cells );
+    _cells = Dict{Point{D,Int},Int}();
+    #hint = 64 * max( 1024, length( r ) )
+    #hint = max( hint, length( P ) + 10 );
+    hint = length( P ) + 10;
+    sizehint!( _cells, hint );
+    #println( "r: ", length( r ) );
+    #println( "hint: ", hint );
+
     @assert( ℓ > 0.0 );
 
     G = CLGridType( P, ℓ, cp, _cells, _lists );
@@ -413,8 +424,10 @@ end
     tgid_trg( P[ loc ], G.ℓ, G.trg )
     CL_add_value!( G, G.trg, loc );
     if   min_ind > 0
+        #println( "CP[", loc,"] : ", min_dist,   " regrid: ", G.f_regrid );
         G.cp = (min_ind, loc );
         G.cp_dist = min_dist;
+        #G.f_regrid = true;
     end
 
     return  G;
@@ -423,20 +436,45 @@ end
 
 function  CL_closest_pair( P::Vector{Point{D,T}} ) where{D,T}
     d = Dist( P[ 1 ], P[ 2 ] );
+    cp = (1,2);
     @assert( d > 0.0 );
 
-    cells = Dict{Point{D,Int},Int}();
-    sizehint!( cells, 4*length( P ) );
-#    println( "len P: ", length( P ) );
-#    println( length( cells.slots ) );
-#    println( length( cells.keys ) );
-
-#    exit( -1 );
+    # We adapt a trick from the Net & Prune paper...
+    pos = rand( 1:length( P ) );
+    p = P[ pos ];
+    limit = length( P );
+    for  i  ∈ 1:limit
+        if  i != pos
+            ℓ = Dist( P[ i ], p )
+            if   ℓ < d
+                d = ℓ
+                cp = (i, pos );
+            end
+        end
+    end
+    # Or we can try a bit harder
+    #=
+    sq = round( Int, sqrt( length( P ) ) )
+    for  i  ∈ 1:sq-1
+        p = P[ i ] 
+        for  j  ∈ i+1:sq+1
+            ℓ = Dist( p, P[ j ] )
+            if   ℓ < d
+                d = ℓ
+                cp = (i, j);
+            end
+        end
+    end
+    =#
     
+    #println( "d: ", d );
+    cells = Dict{Point{D,Int},Int}();
+    sizehint!( cells, min( 1024, length( P ) ) );
+
     lists = zeros(Int, (2+length( P )) * CL_MAX_SIZE )
 
-    
-    G = CL_grid_init( P, d, cells, lists, 1:2, (1,2) );
+
+    G = CL_grid_init( P, d, cells, lists, 1:2, cp );
     for  i ∈ 3:length( P )
         CL_cp_add_point( G, i );
 
@@ -654,6 +692,7 @@ function (@main)(ARGS)
     println( "n: ", n );
     force_compile();
 
+    println( "\n\n--------------------\n\n" );
     P = Polygon_random( D,Float64, n );
 
     PB = deepcopy( Points( P ) );
