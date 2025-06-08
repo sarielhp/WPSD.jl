@@ -1,5 +1,32 @@
 #! /bin/env julia
 
+########################################################################
+# Closest pair of n points in constant dim in linear time using
+# hashing, based on Rabin's algorithm (simplification of this
+# algorithms to be precise).
+#
+# Implemented by Sariel Har-Peled
+########################################################################
+# I invested some energy in making the program being more
+# efficient. One heuristic that the grid is recomputed only if the
+# min-distance changed, and the load of some cell exceeds 4
+#
+# A minor technical issue is that Julia does not support "open"
+# hashing directly. To overcome this, every grid cell has a vector of
+# all the ids of the points stored in this cell. This seems wasteful,
+# but the performance is decent enough. I am sure a speedup of 30%-50%
+# might be possible by doing this in a more clever way, but the
+# solutions I tried (and deleted he code from here), did no in fact
+# yield significant speedup considering their complexity.
+#
+# things in Julia are a bit weird. The exact way you fill the array of
+# points by random points can have a speed difference of up to
+# 10x. The current implementation (essentially using the library
+# function correct, seems to be fastest.
+#
+# 2025-June-7
+########################################################################
+
 
 push!(LOAD_PATH, pwd()*"/src/")
 push!(LOAD_PATH, pwd()*"/src/cg/")
@@ -8,7 +35,6 @@ using FrechetDist;
 using FrechetDist.cg;
 using FrechetDist.cg.polygon;
 using FrechetDist.cg.point;
-#using VirtArray;
 using Printf;
 using StaticArrays;
 
@@ -24,21 +50,6 @@ using StaticArrays;
     end
 
     return  Point{D,Int}( x );
-end
-
-@inline function  tgid(P::Point{D,T}, r::T)::Point{D,Int} where{D,T}
-    x = MVector{D,Int}(undef);
-
-    for i ∈ 1:D
-        x[i] = floor( Int, P[ i ] / r );
-    end
-
-    return  Point{D,Int}( x );
-end
-@inline function  tgid_trg(P::Point{D,T}, r::T, trg::MVector{D,Int} ) where{D,T}
-    for i ∈ 1:D
-        trg[i] = floor( Int, P[ i ] / r );
-    end
 end
 
 
@@ -61,16 +72,15 @@ mutable struct GridType{D,T}
 end
 
 
-
 """
     add_value!
 
     An insertion function for dictionary where a value is an array of values.
 """
-@inline function add_value!(dict, key, value)
+@inline function add_value!(dict::Dict{Point{D,Int},Vector{Int}},
+                            key::SVector{D,Int}, value::Int) where {D}
     if haskey(dict, key)
         push!(dict[key], value)
-        #println( "NL: ", length( dict[key] ) );
     else
         dict[key] = [value]
     end
@@ -82,10 +92,11 @@ function   grid_init( P::Vector{Point{D,T}}, ℓ::T,
     dict = Dict{Point{D,Int},Vector{Int}}();
     sizehint!( dict, min( length( r ), length( P ) ) )
     G = GridType( P, ℓ, dict, cp, ℓ, false,
-                  Point{D,Int}( fill( 1, D ) ) );
+                  Point{D,Int}( fill( 1, D ) ), MVector{D,Int}(undef ) );
 
     for  i ∈ r
-        add_value!( G.cells, gid( P[ i ], ℓ ), i );
+        trg = gid(P[i], ℓ )
+        add_value!( G.cells, trg, i );
     end
 
     return  G;
@@ -93,13 +104,11 @@ end
 
 function  closest_pair_add_point( G::GridType{D,T}, loc::Int ) where{D,T}
     p =  G.P[ loc ];
-    id = gid( p, G.ℓ )
-    id_min = sub( id, G.one );
-    id_max = add( id, G.one );
+    trg = gid( p, G.ℓ )
+    id_min = trg - G.one;
+    id_max = trg + G.one;
 
-    #println( "CPAP: ", loc );
     P = G.P;
-    #println( "ID: ", id );
     min_ind = -1;
     min_dist = G.cp_dist;
     for  cell ∈ CartesianIndex( id_min... ):CartesianIndex( id_max... )
@@ -107,11 +116,9 @@ function  closest_pair_add_point( G::GridType{D,T}, loc::Int ) where{D,T}
         #println( typeof( i ) )
         if  ! haskey( G.cells, i )  continue  end
         list = G.cells[ i ];
-        #println( length( list ) );
         if  length( list ) > 4
             G.f_regrid = true;
         end
-        #println( "new_dist :", list );
         for  p_ind ∈ list
             new_dist = Dist( P[ p_ind ], p )
             if   new_dist < min_dist
@@ -124,13 +131,11 @@ function  closest_pair_add_point( G::GridType{D,T}, loc::Int ) where{D,T}
     # Minimum distance had not changed. Nothing much to do...
     add_value!( G.cells, gid( P[ loc ], G.ℓ ), loc );
     if   min_ind > 0
-        #G.f_regrid = true;
-        #println( "min_dist: ", min_dist );
         G.cp = (min_ind, loc );
         G.cp_dist = min_dist;
     end
 
-    if  G.f_regrid
+    if  G.f_regrid  
         #println( "REGRID!" );
         G = grid_init( G.P, G.cp_dist, 1:loc, G.cp );
     end
@@ -144,358 +149,17 @@ function  closest_pair( P::Vector{Point{D,T}} ) where{D,T}
     @assert( d > 0.0 );
 
     G = grid_init( P, d, 1:2, (1,2) );
-    #println( typeof( G ) );
     for  i ∈ 3:length( P )
         G = closest_pair_add_point( G, i );
-
     end
 
     return  G;
 end
-
-
-############################################################################
-# closest pair using open hashing implemented using an extra counter
-############################################################################
-
-
-mutable struct OHGridType{D,T,DPONE}
-    P::Vector{Point{D,T}}
-    ℓ::Float64  # Side length
-    cells::Dict{Point{DPONE,Int},Int}
-
-    cp::Tuple{Int, Int};
-    cp_dist::T;
-    f_regrid::Bool
-end
-
-function  OHGridType( _P::Vector{Point{D,T}}, _ℓ::Float64,
-                      _cells::Dict{Point{DPONE,Int},Int},
-                     _cp::Tuple{Int, Int} ) where{D,T,DPONE}
-    @assert( (D+1) == DPONE );
-    return OHGridType( _P, _ℓ, _cells, _cp, _ℓ, false );
-end
-
-
-"""
-    OH_add_value!
-
-    An insertion function for dictionary where a value is an array of values.
-"""
-@inline function OH_add_value!(dict, _key::Point{D,Int}, value, count = 1) where {D}
-    key = Point{D+1,Int}( _key..., count );
-    while  haskey( dict, key )
-        count += 1;
-        key = Point{D+1,Int}( _key..., count );
-    end
-
-    dict[key] = value
-end
-
-
-function   OH_extract_list( G::OHGridType{D,T,DPONE}, p::Point{D,Int},
-                            out::Vector{Int} ) where{D,T,DPONE}
-    empty!( out );
-    count = 1;
-    key = Point{D+1,Int}( p..., count );
-    while  true
-        push!( out, G.cells[ key ] );
-
-        count += 1;
-        key = Point{D+1,Int}( p..., count );
-
-        if  ! haskey( G.cells, key )  break  end
-    end
-end
-
-
-function   OH_grid_init( P::Vector{Point{D,T}}, ℓ::T,
-                         r::UnitRange{Int} = eachindex( arr ), cp = (-1,-1) ) where{D,T}
-
-    dict = Dict{Point{D+1,Int},Int}();
-    sizehint!( dict, min( length( r ), length( P ) ) )
-    G = OHGridType( P, ℓ, dict, cp );
-
-    for  i ∈ r
-        OH_add_value!( G.cells, gid( P[ i ], ℓ ), i );
-    end
-
-    return  G;
-end
-
-function  OH_cp_add_point( G::OHGridType{D,T}, loc::Int, list::Vector{Int} ) where{D,T}
-    p =  G.P[ loc ];
-    id = gid( p, G.ℓ )
-    cid = CartesianIndex( id... );
-    v = Point{D,Int}( fill( 1, D ) );
-    id_min = sub( id, v );
-    id_max = add( id, v );
-
-    P = G.P;
-
-    min_ind = -1;
-    min_dist = G.cp_dist;
-    id_load::Int = 0;
-    for  cell ∈ CartesianIndex( id_min... ):CartesianIndex( id_max... )
-        i = Point{D+1,Int}( Tuple( cell )..., 1 );
-        if  ! haskey( G.cells, i )  continue  end
-
-        OH_extract_list( G, Point{D,Int}( collect(Tuple( cell ) ) ), list );
-
-        ll = length( list )
-        if  ( cell == cid )
-            id_load = ll
-        end
-        if  ll > 4
-            G.f_regrid = true;
-        end
-        for  p_ind ∈ list
-            new_dist = Dist( P[ p_ind ], p )
-            if   new_dist < min_dist
-                min_dist = new_dist;
-                min_ind = p_ind;
-#                G.f_regrid = true;
-            end
-        end
-    end
-
-    OH_add_value!( G.cells, gid( P[ loc ], G.ℓ ), loc, id_load+1 );
-    if   min_ind > 0
-        G.cp = (min_ind, loc );
-        G.cp_dist = min_dist;
-    end
-
-    if  G.cp_dist < G.ℓ  &&  G.f_regrid
-#    if  G.f_regrid
-        #println( "REGRID!" );
-        G = OH_grid_init( G.P, G.cp_dist, 1:loc, G.cp );
-    end
-
-    return  G;
-end
-
-
-function  OH_closest_pair( P::Vector{Point{D,T}} ) where{D,T}
-    d = Dist( P[ 1 ], P[ 2 ] );
-    @assert( d > 0.0 );
-
-    list = Vector{Int}();
-
-    G = OH_grid_init( P, d, 1:2, (1,2) );
-    #println( typeof( G ) );
-    for  i ∈ 3:length( P )
-        G = OH_cp_add_point( G, i, list );
-    end
-
-    return  G;
-end
-
-
-
-
-#############################################################################
-############################################################################
-# closest pair using open hashing implemented using preallocated array for
-#  the conflict lists
-############################################################################
-
-CL_MAX_SIZE::Int64 = 5
-
-mutable struct CLGridType{D,T}
-    P::Vector{Point{D,T}}
-    ℓ::Float64  # Side length
-    cells::Dict{Point{D,Int},Int}
-
-    lists::Vector{Int};
-    lists_pos::Int64
-
-    cp::Tuple{Int, Int};
-    cp_dist::T;
-    f_regrid::Bool
-    one::Point{D,Int}
-    trg::MVector{D,Int}
-end
-
-function  CLGridType( _P::Vector{Point{D,T}}, _ℓ::Float64,
-    _cp::Tuple{Int, Int},
-    _cells::Dict{Point{D,Int},Int},
-    _lists::Vector{Int}
-) where{D,T}
-    return CLGridType( _P, _ℓ, _cells,
-        _lists,
-        1,
-        _cp, _ℓ, false,
-        Point{D,Int}( fill( 1, D ) ),
-        MVector{D,Int}( fill( 0, D ) ) );
-end
-
-
-"""
-    CL_add_value!
-
-    An insertion function for dictionary where a value is an array of values.
-"""
-@inline function CL_add_value!( G::CLGridType{D,T}, key::MVector{D,Int},
-    value::Int ) where {D,T}
-    if ! haskey( G.cells, key )
-        loc = G.lists_pos
-        G.lists_pos += CL_MAX_SIZE;
-        #println( key, " hash: ", hash( key ) );
-        #println( key, " hash: ", hash( key ) );
-        G.cells[ key ] = loc;
-    else
-        loc = G.cells[ key ];
-    end
-    start = loc;
-    while  ( G.lists[ loc ] != 0 )
-        loc += 1
-    end
-    G.lists[ loc ] = value;
-    if  ( loc - start ) > ( CL_MAX_SIZE - 2 )
-        G.f_regrid = true;
-    end
-end
-
-
-function   CL_grid_init( P::Vector{Point{D,T}}, ℓ::T,
-    _cells::Dict{Point{D,Int},Int},
-    _lists::Vector{Int},
-        r::UnitRange{Int} = eachindex( arr ),
-    cp = (-1,-1)
-) where{D,T}
-    #=
-    for  ( key, val) ∈ _cells
-        for  i ∈ 0:CL_MAX_SIZE
-            _lists[ val + i ] = 0;
-        end
-    end
-    =#
-    #@time
-    #println( "CL_grid_init" );
-    fill!( _lists, zero( Int ) );
-    #empty!( _cells );
-    _cells = Dict{Point{D,Int},Int}();
-    #hint = 64 * max( 1024, length( r ) )
-    #hint = max( hint, length( P ) + 10 );
-    hint = length( P ) + 10;
-    sizehint!( _cells, hint );
-    #println( "r: ", length( r ) );
-    #println( "hint: ", hint );
-
-    @assert( ℓ > 0.0 );
-
-    G = CLGridType( P, ℓ, cp, _cells, _lists );
-
-    G.trg = MVector{D,Int}( undef )
-    for  i ∈ r
-        tgid_trg( P[ i ], ℓ, G.trg )
-        CL_add_value!( G, G.trg, i );
-    end
-
-    return  G;
-end
-
-@inline function  CL_cp_add_point( G::CLGridType{D,T}, loc::Int,
-) where{D,T}
-    p =  G.P[ loc ];
-    id = gid( p, G.ℓ )
-    id_min = sub( id, G.one );
-    id_max = add( id, G.one );
-
-    P = G.P;
-
-    min_ind = -1;
-    min_dist = G.cp_dist;
-
-    for  cell ∈ CartesianIndex( id_min... ):CartesianIndex( id_max... )
-        i = Point{D,Int}( Tuple( cell )... );
-        if  ! haskey( G.cells, i )  continue  end
-        cloc = G.cells[ i ] ;
-
-        while  G.lists[ cloc ] != 0
-            p_ind = G.lists[ cloc ] ;
-            new_dist = Dist( P[ p_ind ], p )
-            if   new_dist < min_dist
-                min_dist = new_dist;
-                min_ind = p_ind;
-            end
-            cloc += 1
-        end
-    end
-
-    tgid_trg( P[ loc ], G.ℓ, G.trg )
-    CL_add_value!( G, G.trg, loc );
-    if   min_ind > 0
-        #println( "CP[", loc,"] : ", min_dist,   " regrid: ", G.f_regrid );
-        G.cp = (min_ind, loc );
-        G.cp_dist = min_dist;
-        #G.f_regrid = true;
-    end
-
-    return  G;
-end
-
-
-function  CL_closest_pair( P::Vector{Point{D,T}} ) where{D,T}
-    d = Dist( P[ 1 ], P[ 2 ] );
-    cp = (1,2);
-    @assert( d > 0.0 );
-
-    # We adapt a trick from the Net & Prune paper...
-    pos = rand( 1:length( P ) );
-    p = P[ pos ];
-    limit = length( P );
-    for  i  ∈ 1:limit
-        if  i != pos
-            ℓ = Dist( P[ i ], p )
-            if   ℓ < d
-                d = ℓ
-                cp = (i, pos );
-            end
-        end
-    end
-    # Or we can try a bit harder
-    #=
-    sq = round( Int, sqrt( length( P ) ) )
-    for  i  ∈ 1:sq-1
-        p = P[ i ]
-        for  j  ∈ i+1:sq+1
-            ℓ = Dist( p, P[ j ] )
-            if   ℓ < d
-                d = ℓ
-                cp = (i, j);
-            end
-        end
-    end
-    =#
-
-    #println( "d: ", d );
-    cells = Dict{Point{D,Int},Int}();
-    sizehint!( cells, min( 1024, length( P ) ) );
-
-    lists = zeros(Int, (2+length( P )) * CL_MAX_SIZE )
-
-
-    G = CL_grid_init( P, d, cells, lists, 1:2, cp );
-    for  i ∈ 3:length( P )
-        CL_cp_add_point( G, i );
-
-        if  G.cp_dist < G.ℓ  &&  G.f_regrid
-            G = CL_grid_init( G.P, G.cp_dist, G.cells, G.lists, 1:i, G.cp );
-        end
-    end
-
-    return  G;
-end
-
-
-
 
 
 ############################################################################
 # Closest pair in the plane using divide-and-conquer in O( n log n ) time.
 ############################################################################
-
 
 mutable struct  Solution
     d::Float64
@@ -530,7 +194,10 @@ function  lt(o::SortByCoord, a, b)
 end
 
 function  PointSetXY( _P::Points2F )
-    PS = PointSetXY( _P, collect( 1:length( _P ) ), collect( 1:length( _P ) ) );
+    #PS = PointSetXY( _P, collect( 1:length( _P ) ), collect( 1:length( _P ) ) );
+    len::Int = length( _P );
+    v1n=[i for i ∈ 1:len ]
+    PS = PointSetXY( _P, v1n, deepcopy( v1n ) );
 
     # Sort the points by x-axis, and store the ordering in PS.ord_x
     sort!( PS.ord_x, order=SortByCoord( PS.P, 1 ) );
@@ -616,10 +283,10 @@ end
 
 
 ############################################################################
-# Closest pair in the plane using divide-and-conquer in O( n log n ) time.
+# Closest pair  brute force in O(n^2) time.
 ############################################################################
 
-function  closest_pair_brute_force( PS::Points2F )
+function  closest_pair_brute_force( PS::Vector{Point{D,T}} ) where{D,T}
     sol = Solution( Dist(PS[1], PS[2]), 1, 2 );
 
     for  i in 1:length( PS ) -1
@@ -636,28 +303,10 @@ function  closest_pair_brute_force( PS::Points2F )
     return  sol;
 end
 
-function  main_dc()
-    # The D&C algorithm seems faster than the naive algorithm around n ≈ 200
-    n = 200;
-
-    println( "n : ", n );
-    PS = PointSetXY(  [ (rand(), rand()) for i ∈ 1:n] );
-
-    @time sol = closest_pair( PS );
-    @time sol_bf = closest_pair_brute_force( PS );
-
-    println( "cp    : ", sol );
-    println( "cp_bf : ", sol_bf );
-end
-
-#main();
-
 
 function  append_to_file( file_path, str )
     try
         open(file_path, "a") do file
-            # It's good practice to add a newline character if the appended
-            # content should start on a new line.
             write(file,  str)
         end
     catch e
@@ -673,11 +322,9 @@ function  force_compile()
     D=2
     n = 1000
     P = Points( Polygon_random( D,Float64, n ) );
-    t_OH_rand = @timed OH_G = OH_closest_pair( P );
     t_dc      = @timed sol = closest_pair_dc( P );
     t_bf      = @timed sol_bf = closest_pair_brute_force( P );
     t_rand    = @timed G = closest_pair( P );
-    t_CL_rand = @timed OH_G   = CL_closest_pair( P );
 end
 
 
@@ -695,50 +342,39 @@ function (@main)(ARGS)
     force_compile();
 
     println( "\n\n--------------------\n\n" );
-    println( "Generating input..." );
-    @time P = Polygon_random( D,Float64, n );
-    println( "Done. Copying:" );
+    println( "Generating input & Copying..." );
+    P = Polygon_random( D,Float64, n );
 
     PB = deepcopy( Points( P ) );
     PC = deepcopy( Points( P ) );
     PD = deepcopy( Points( P ) );
-    PE = deepcopy( Points( P ) );
-    PF = deepcopy( Points( P ) );
 
-    println( "Done copying." );
+    println( "Done." );
 
-    t_rand    = @timed G      = closest_pair( PF );
+    f_brute_force::Bool = false;
+    if  ( n < 10_000 )
+        f_brute_force = true;
+        t_brute = @timed sol_bf = closest_pair_brute_force( PB );
+        @printf( "Time brute         : %10.5f\n", t_brute.time );
+    end
+    
+    t_rand    = @timed G      = closest_pair( PC );
     @printf( "Time Rand          : %10.5f\n", t_rand.time );
-
-    t_CL_rand = @timed CL_G   = CL_closest_pair( PB );
-    @printf( "Time Rand (CL)     : %10.5f\n", t_CL_rand.time );
-
-    t_OH_rand = @timed OH_G   = OH_closest_pair( PC );
-    @printf( "Time Rand (OH)     : %10.5f\n", t_OH_rand.time );
 
     t_dc      = @timed sol    = closest_pair_dc( PD );
     @printf( "Time D&C           : %10.5f\n", t_dc.time );
-    #t_bf      = @timed sol_bf = closest_pair_brute_force( PE );
 
-    #@printf( "Time Brute force   : %10.5f\n", t_bf.time );
     println( "Distance                            : ", sol.d );
 
-    str = @sprintf( "%12d,  %11.6f, %11.6f, %11.6f, %11.6f\n",
+    str = @sprintf( "%12d,  %11.6f, %11.6f\n",
         length( P ),
-        t_dc.time, t_rand.time,
-             t_OH_rand.time, t_CL_rand.time );
+        t_dc.time, t_rand.time );
 
     append_to_file( "results/closest_pair.txt", str );
 
     if  ( sol.d != G.cp_dist )
         println( "\n\n\nBUG!!!!\n\n\n\n" );a
     end
-    if  ( sol.d != OH_G.cp_dist )
-        println( "\n\n\nBUG in open-hash grid !!!!\n\n\n\n" );
-    end
-    if  ( sol.d != CL_G.cp_dist )
-        println( "\n\n\nBUG in open-hash grid !!!!\n\n\n\n" );
-        println( "CL_G.cp_dist: ", CL_G.cp_dist );
-    end
+
     return  0;
 end
