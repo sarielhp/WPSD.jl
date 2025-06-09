@@ -42,6 +42,25 @@ end
 
 
 ######################################################################
+# Weighted point set
+######################################################################
+mutable struct WPointSet{D,T}
+    orig_PS::Vector{Point{D,T}};    # Original point setup
+    PS::Vector{Int};                # The point set -- locations are
+                                    # pointers to original points.
+    W::Vector{Int};                 # Weights of points
+end
+
+
+function  WPointSet( _PS::Vector{Point{D,T}} )  where{D,T}
+    PS = [i for i ∈ 1:length(PS) ]
+    W = fill(1, length( PS ) );
+
+    return  WPointSet( _PS, PS, W );
+end
+
+
+######################################################################
 # Linear time algorithm using hashing - using vectors to implement
 # open hashing - probably a terrible idea.
 ######################################################################
@@ -127,11 +146,10 @@ end
 ############################################################################
 ############################################################################
 
-@inline function  check_neighbors( P, G, cell, list, far )
+@inline function  check_neighbors( P, G, cell, i_pnt, far )
     id_min = cell .- Δ
     id_max = cell .+ Δ
 
-    i_pnt = list[ 1 ] ;
     p = P[ i_pnt ];
     for  _subc ∈ CartesianIndex( id_min... ):CartesianIndex( id_max... )
         subc = Point{D,Int}( Tuple( _subc )... )
@@ -165,7 +183,7 @@ function  r_far( P::Vector{Point{D,T}}, rad::T ) where{D,T}
             end
             continue;
         end
-        check_neighbors( P, G, cell, list, far );
+        check_neighbors( P, G, cell, list[ 1 ], far );
     end
 
     return  far;
