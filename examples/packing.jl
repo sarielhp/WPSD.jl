@@ -44,19 +44,47 @@ end
 ######################################################################
 # Weighted point set
 ######################################################################
-mutable struct WPointSet{D,T}
+mutable struct WPoints{D,T}
     orig_PS::Vector{Point{D,T}};    # Original point setup
     PS::Vector{Int};                # The point set -- locations are
                                     # pointers to original points.
     W::Vector{Int};                 # Weights of points
 end
 
+@inline function  Base.length( P::WPoints{D,T} ) where {D,T}
+    return  length( W.PS );
+end
 
-function  WPointSet( _PS::Vector{Point{D,T}} )  where{D,T}
+function  WPoints( _PS::Vector{Point{D,T}} )  where{D,T}
     PS = [i for i ∈ 1:length(PS) ]
     W = fill(1, length( PS ) );
 
     return  WPointSet( _PS, PS, W );
+end
+
+@inline function  Base.getindex(P::WPoints{D,T}, i::Int) where {D,T}
+    return   P.orig_PS[ P.PS[ i ] ];
+end
+
+ 
+@inline function  weight(P::WPoints{D,T}, i::Int) where {D,T}
+    return   P.W[ i ];
+end
+
+
+function   add_weight_to_point( P::WPoints{D,T}, i::Int, w::T ) where {D,T}
+    P.W[ i ] += w;
+end
+
+function  oindex( P::WPonits{D,T}, i ) where {D,T}
+    return  P.PS[ i ];
+end
+
+function  add_point!( P::WPoints{D,T}, oind::Int, w::T ) where {D,T}
+    push( P.PS, oind );
+    push( P.W , w );
+    @assert( length( P.PS ) == length( P.W ) );
+    return  length( P.PS );
 end
 
 
@@ -66,15 +94,16 @@ end
 ######################################################################
 
 
-mutable struct GridType{D,T}
-    P::Vector{Point{D,T}}
+mutable struct PackingGridType{D,T}
+    P::WPoints{D,T}
+    N::WPoints{D,T}   # Computed packing
     ℓ::Float64  # Side length
     cells::Dict{Point{D,Int},Vector{Int}}
 end
 
 
 """
-    add_value!
+    store_value!
 
     An insertion function for dictionary where a value is an array of values.
 """
@@ -87,56 +116,55 @@ end
     end
 end
 
-function   grid_store( P::Vector{Point{D,T}}, ℓ::T,
-                      r::UnitRange{Int} = eachindex( P ) ) where{D,T}
+function   packing_grid_init( P::WPoints{D,T}}, ℓ::T )  where{D,T}
 
     dict = Dict{Point{D,Int},Vector{Int}}();
-    sizehint!( dict, min( length( r ), length( P ) ) )
-    G = GridType( P, ℓ, dict );
-
-    for  i ∈ r
-        trg = gid(P[i], ℓ )
-        store_value!( G.cells, trg, i );
-    end
-
-    return  G;
+    return  PackingGridType( P, WPoints{D,T}(), ℓ, dict );
 end
 
-function   packing_add_point( G::GridType{D,T}, loc::Int, rad::T ) where{D,T}
-    p =  G.P[ loc ];
+function   packing_add_point( G::PackingGridType{D,T}, loc::Int, rad::T ) where{D,T}
+    P, N = G.P, G.N;
+    p =  P[ loc ];
     trg = gid( p, G.ℓ )
     id_min = trg .- 1;
     id_max = trg .+ 1;
 
-    P = G.P;
     for  cell ∈ CartesianIndex( id_min... ):CartesianIndex( id_max... )
         i = Point{D,Int}( Tuple( cell )... );
         #println( typeof( i ) )
         if  ! haskey( G.cells, i )  continue  end
         list = G.cells[ i ];
-        if  length( list ) > 4
-            G.f_regrid = true;
-        end
         for  p_ind ∈ list
-            if   Dist( P[ p_ind ], p ) < rad
+            if   Dist( N[ p_ind ], p ) < rad
+                add_weight_to_point( N, p_ind, weight( P, loc ) );
                 return
             end
         end
     end
 
-    store_value!( G.cells, trg, loc );
+    oloc = oindex( P, loc )
+    i = add_point!( N, oloc, weight( P, loc ) );
+    store_value!( G.cells, trg, i );
 end
 
 
-function  packing( P::Vector{Point{D,T}}, rad::T ) where{D,T}
-    G = grid_store( P, rad, 1:1);
-    for  i ∈ 2:length( P )
+function  packing( P::WPoints{D,T}}, rad::T ) where{D,T}
+    G = packing_grid_init( P, rad );
+    for  i ∈ 1:length( P )
         packing_add_point(G, i, rad );
     end
 
+    return  G.N;
+end
+
+
+function  packing( _P::Vector{Point{D,T}}, rad::T ) where{D,T}
+    P = WPoints( _P );
+    N = packing( P );
+
     out = Vector{Int}();
-    for  (cell, list) ∈ G.cells
-        Base.append!( out, list );
+    for  i ∈ 1:length(N)
+        push!( out, oindex( N, i ) );
     end
 
     return  out;
@@ -145,6 +173,16 @@ end
 
 ############################################################################
 ############################################################################
+
+function   grid_neighberhood( base::Point{D,Int}, dist::T, ℓ::T ) where {D,T}
+    Δ = 
+#    ℓ = dist / sqrt( D )
+    n = length( P )
+    G = grid_store( P, ℓ, 1:n )
+
+    Δ = ceil(Int, sqrt( D ) )
+end
+
 
 @inline function  check_neighbors( P, G, cell, i_pnt, far )
     id_min = cell .- Δ
@@ -183,7 +221,7 @@ function  r_far( P::Vector{Point{D,T}}, rad::T ) where{D,T}
             end
             continue;
         end
-        check_neighbors( P, G, cell, list[ 1 ], far );
+        check_neighbors( P, G, cell, list[ 1 ], far, Δ );
     end
 
     return  far;
