@@ -175,12 +175,30 @@ end
 ############################################################################
 
 function   grid_neighberhood( base::Point{D,Int}, dist::T, ℓ::T ) where {D,T}
-    Δ = 
-#    ℓ = dist / sqrt( D )
+    Δ = ceil(Int, dist / ℓ ) + 1;
+
+    id_min = cell .- Δ
+    id_max = cell .+ Δ
+
+    #    ℓ = dist / sqrt( D )
     n = length( P )
     G = grid_store( P, ℓ, 1:n )
+    nbr = Vector{Point{D,Int}}();
+    for  _subc ∈ CartesianIndex( id_min... ):CartesianIndex( id_max... )
+        subc = Point{D,Int}( Tuple( _subc )... )
+        sum::Float64 = 0
+        for i ∈ 1:D
+            x::Float64 = max( abs( subc[ i ] - base[ i ] ) - 1, 0 );
+            sum += x*x;
+        end
+        d = sqrt(sum) * ℓ;
+        if  ( d > dist )
+            continue;
+        end
+        push!( nbr, subc );
+    end
 
-    Δ = ceil(Int, sqrt( D ) )
+    return  nbr;
 end
 
 
