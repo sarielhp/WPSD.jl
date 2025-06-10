@@ -13,24 +13,40 @@
 ########################################################################
 
 
-push!(LOAD_PATH, pwd()*"/src/")
-push!(LOAD_PATH, pwd()*"/src/cg/")
+myBase = "/home/sariel/prog/25/wspd"
 
+push!(LOAD_PATH, myBase * "/src/")
+push!(LOAD_PATH, myBase * "/src/cg/")
+
+### To make emacs lsp mode works correctly...
+macro ignore(args...) end
+
+@ignore    include("../src/cg/FrechetDist.jl")
+@ignore    include("../src/cg/polygon.jl")
+@ignore    include("../src/cg/point.jl")
+@ignore    include("../src/cg/cg.jl")
+
+using Distributions
 using FrechetDist;
 using FrechetDist.cg;
 using FrechetDist.cg.polygon;
 using FrechetDist.cg.point;
 using Printf;
 using StaticArrays;
+using Cairo
 
 include( "graphics.jl" )
 
+@ignore Point{D,T} = FrechetDist.cg.point.Point{D,T}
+@ignore Dist =  FrechetDist.cg.point.Dist
+@ignore Points =  FrechetDist.cg.polygon.Points
 
 ######################################################################
 # Misc
 ######################################################################
 
-@inline function  gid(P::Point{D,T}, r::T)::Point{D,Int} where{D,T}
+@inline function  gid(P::Point{D,T},
+                       r::T)::Point{D,Int} where{D,T}
     x = MVector{D,Int}(undef);
 
     for i ∈ 1:D
@@ -52,37 +68,44 @@ mutable struct WPoints{D,T}
 end
 
 @inline function  Base.length( P::WPoints{D,T} ) where {D,T}
-    return  length( W.PS );
+    return  length( P.PS );
+end
+
+
+# An empty weighted point set, using the same ground set for defining
+# the point set
+function  WPoints_empty( G::WPoints{D,T} )  where{D,T}
+    return  WPoints( G.orig_PS, Vector{Int}(), Vector{Int}() );
 end
 
 function  WPoints( _PS::Vector{Point{D,T}} )  where{D,T}
-    PS = [i for i ∈ 1:length(PS) ]
+    PS = [i for i ∈ 1:length(_PS) ]
     W = fill(1, length( PS ) );
 
-    return  WPointSet( _PS, PS, W );
+    return  WPoints( _PS, PS, W );
 end
 
 @inline function  Base.getindex(P::WPoints{D,T}, i::Int) where {D,T}
     return   P.orig_PS[ P.PS[ i ] ];
 end
 
- 
+
 @inline function  weight(P::WPoints{D,T}, i::Int) where {D,T}
     return   P.W[ i ];
 end
 
 
-function   add_weight_to_point( P::WPoints{D,T}, i::Int, w::T ) where {D,T}
+function   add_weight_to_point( P::WPoints{D,T}, i::Int, w::Int ) where {D,T}
     P.W[ i ] += w;
 end
 
-function  oindex( P::WPonits{D,T}, i ) where {D,T}
+function  oindex( P::WPoints{D,T}, i ) where {D,T}
     return  P.PS[ i ];
 end
 
-function  add_point!( P::WPoints{D,T}, oind::Int, w::T ) where {D,T}
-    push( P.PS, oind );
-    push( P.W , w );
+function  add_point!( P::WPoints{D,T}, oind::Int, w::Int ) where {D,T}
+    push!( P.PS, oind );
+    push!( P.W , w );
     @assert( length( P.PS ) == length( P.W ) );
     return  length( P.PS );
 end
@@ -94,9 +117,8 @@ end
 ######################################################################
 
 
-mutable struct PackingGridType{D,T}
+mutable struct WGrid{D,T}
     P::WPoints{D,T}
-    N::WPoints{D,T}   # Computed packing
     ℓ::Float64  # Side length
     cells::Dict{Point{D,Int},Vector{Int}}
 end
@@ -116,14 +138,14 @@ end
     end
 end
 
-function   packing_grid_init( P::WPoints{D,T}}, ℓ::T )  where{D,T}
-
+function   WGrid_init( Ground::WPoints{D,T}, ℓ::T )::WGrid{D,T}  where{D,T}
     dict = Dict{Point{D,Int},Vector{Int}}();
-    return  PackingGridType( P, WPoints{D,T}(), ℓ, dict );
+
+    return  WGrid( WPoints_empty( Ground ), ℓ, dict );
 end
 
-function   packing_add_point( G::PackingGridType{D,T}, loc::Int, rad::T ) where{D,T}
-    P, N = G.P, G.N;
+function   packing_add_point( G::WGrid{D,T}, loc::Int, rad::T,
+                              P::WPoints{D,T} ) where{D,T}
     p =  P[ loc ];
     trg = gid( p, G.ℓ )
     id_min = trg .- 1;
@@ -131,36 +153,36 @@ function   packing_add_point( G::PackingGridType{D,T}, loc::Int, rad::T ) where{
 
     for  cell ∈ CartesianIndex( id_min... ):CartesianIndex( id_max... )
         i = Point{D,Int}( Tuple( cell )... );
-        #println( typeof( i ) )
         if  ! haskey( G.cells, i )  continue  end
         list = G.cells[ i ];
         for  p_ind ∈ list
-            if   Dist( N[ p_ind ], p ) < rad
-                add_weight_to_point( N, p_ind, weight( P, loc ) );
+            if   Dist( G.P[ p_ind ], p ) < rad
+                add_weight_to_point( G.P, p_ind, weight( P, loc ) );
                 return
             end
         end
     end
 
     oloc = oindex( P, loc )
-    i = add_point!( N, oloc, weight( P, loc ) );
+    i = add_point!( G.P, oloc, weight( P, loc ) );
     store_value!( G.cells, trg, i );
 end
 
 
-function  packing( P::WPoints{D,T}}, rad::T ) where{D,T}
-    G = packing_grid_init( P, rad );
+function  packing( P::WPoints{D,T}, rad::T ) where{D,T}
+    G = WGrid_init( P, rad );
     for  i ∈ 1:length( P )
-        packing_add_point(G, i, rad );
+        packing_add_point( G, i, rad, P );
     end
 
-    return  G.N;
+    return  G.P;
 end
 
 
 function  packing( _P::Vector{Point{D,T}}, rad::T ) where{D,T}
     P = WPoints( _P );
-    N = packing( P );
+
+    N = packing( P, rad );
 
     out = Vector{Int}();
     for  i ∈ 1:length(N)
@@ -174,15 +196,16 @@ end
 ############################################################################
 ############################################################################
 
+
 function   grid_neighberhood( base::Point{D,Int}, dist::T, ℓ::T ) where {D,T}
     Δ = ceil(Int, dist / ℓ ) + 1;
 
-    id_min = cell .- Δ
-    id_max = cell .+ Δ
+    id_min = base .- Δ
+    id_max = base .+ Δ
 
     #    ℓ = dist / sqrt( D )
-    n = length( P )
-    G = grid_store( P, ℓ, 1:n )
+    #n = length( P )
+    #G = grid_store( P, ℓ, 1:n )
     nbr = Vector{Point{D,Int}}();
     for  _subc ∈ CartesianIndex( id_min... ):CartesianIndex( id_max... )
         subc = Point{D,Int}( Tuple( _subc )... )
@@ -202,34 +225,53 @@ function   grid_neighberhood( base::Point{D,Int}, dist::T, ℓ::T ) where {D,T}
 end
 
 
-@inline function  check_neighbors( P, G, cell, i_pnt, far )
-    id_min = cell .- Δ
-    id_max = cell .+ Δ
-
+@inline function  check_neighbors( G::WGrid{D,T}, cell, i_pnt,
+                                   far, rad, nbr ) where{D,T}
+    P = G.P;
     p = P[ i_pnt ];
-    for  _subc ∈ CartesianIndex( id_min... ):CartesianIndex( id_max... )
-        subc = Point{D,Int}( Tuple( _subc )... )
+    for  _subc ∈ nbr
+        subc = cell + _subc;
         if  haskey( G.cells, subc )
-            subl = G.cells[ subc ];
+            subl = G.cells[ subc ]
             for  j ∈ subl
+                if  j == i_pnt
+                    continue
+                end
                 if  Dist( p, P[ j ] ) <= rad
-                    far[ i_pnt ] = false;
-                    return;
+                    far[ i_pnt ] = far[ j ]= false
+                    return
                 end
             end
         end
     end
 end
 
+"""
+    grid_store
 
-function  r_far( P::Vector{Point{D,T}}, rad::T ) where{D,T}
+Stor all the points in P[ rng ] in the grid G.
+"""
+
+function   grid_store( G, P::WPoints{D,T}, rng ) where{D,T}
+    for i ∈ rng
+        p = P[ i ]
+        trg = gid( p, G.ℓ )
+        add_point!( G.P, oindex( P, i ), P.W[ i ] )
+        store_value!( G.cells, trg, length( G.P) );
+    end
+end
+
+function  r_far( P::WPoints{D,T}, rad::T ) where{D,T}
     ℓ = rad / sqrt( D )
     n = length( P )
-    G = grid_store( P, ℓ, 1:n )
+    G = WGrid_init( P, ℓ )
 
-    Δ = ceil(Int, sqrt( D ) )
+    nbr = grid_neighberhood( zero(Point{D,Int}), rad, ℓ );
 
-    out = Vector{Int}()
+    grid_store( G, P, 1:n )
+
+    #Δ = ceil(Int, sqrt( D ) )
+
     far = fill( true, n )
     for  (cell, list) ∈ G.cells
         # If there are 2 or more points in the cell, then they are all near...
@@ -239,7 +281,7 @@ function  r_far( P::Vector{Point{D,T}}, rad::T ) where{D,T}
             end
             continue;
         end
-        check_neighbors( P, G, cell, list[ 1 ], far, Δ );
+        check_neighbors( G, cell, list[ 1 ], far,  rad, nbr );
     end
 
     return  far;
@@ -249,10 +291,171 @@ end
 ############################################################################
 
 
-function  force_compile()
-    return  0
+function  nn_dist( P, ind::Int )
+    n = length( P );
+    @assert( n > 1 );
+    p = P[ ind ];
+    min_ind = ( ind == 1 ) ? 2 : 1
+    min_dist = Dist( p, P[ min_ind ] );
+    for  j ∈ 1:n
+        if  j == ind  continue  end
+
+        d = Dist( p, P[ j ] )
+        if  d < min_dist
+            min_dist = d
+            min_ind = j
+        end
+    end
+
+    return  min_ind, min_dist
 end
 
+"""
+    random_nn_dist
+
+# Returned value
+
+Returns a triple: i, j, dist.
+
+i: the index of a random point in P,
+j: The index of the closest point in P to P[i].
+dist: Distance between P[i] and P[j].
+"""
+function  random_nn_dist( P )
+    i = rand( 1:length( P ) );
+    return  i, nn_dist( P, i )...;
+end
+
+
+function  max_weight( P::WPoints{D,T} ) where {D,T}
+    i = argmax( P.W );
+    return  i, P.W[ i ]...;
+end
+
+
+
+function  subset( P::WPoints{D,T}, keep ) where {D,T}
+    @assert( length( P ) == length( keep ) );
+
+    O = WPoints_empty( P );
+
+    for  i ∈ 1:length( P.W )
+        if   keep[ i ]
+            add_point!( O, oindex( P, i ), P.W[ i ] )
+        end
+    end
+
+    return  O;
+end
+
+
+function   min_ball( P::Vector{Point{D,T}}, i, k ) where {D,T}
+    cen = P[ i ];
+
+    arr = [Dist(cen, q) for q ∈ P ];
+    d = partialsort!( arr, k )
+
+    return  cen, d;
+end
+
+
+############################################################################
+############################################################################
+function   smallest_k_ball( _P::Vector{Point{D,T}}, k::Int ) where{D,T}
+    P = WPoints( _P );
+
+    while  true
+        _, _, dist = random_nn_dist( P );
+
+        N = packing( P, dist );
+        mw = max_weight( N )[ 2 ]
+
+        # If there is a packing point with weight ≥ k, then we can
+        # throw away the far points
+        if  ( mw >= k )
+            far = r_far( P, dist );
+            near = .!far;
+            if ( sum( near ) < length( P ) )
+                P = subset( P, near );
+                continue;
+            end
+        end
+
+        N_4 = packing( P, 4*dist );
+        ind, mw_4 = max_weight( N_4 )
+        if  ( mw_4 >= k )
+            return  min_ball( _P, oindex( P, ind ), k );
+        end
+
+        P = N;
+    end
+end
+
+
+############################################################################
+############################################################################
+
+function  draw_two_sets( P, N, filename )
+    # Output to file...
+    c,cr,_ = cairo_setup( filename, [P], true );
+
+    n = length( P );
+    set_source_rgb(cr, 0.8, 0.2, 0.2) # An nice red color
+    draw_points( cr, Points( N ), 1.0/(sqrt(n)) );
+    Cairo.stroke( cr );
+
+    set_source_rgb(cr, 1.0, 0.0, 0.8);
+    draw_points( cr, Points( P ), 1/(16*sqrt(n)) );
+    Cairo.stroke( cr );
+
+    finish( c );
+    println( "     Created: ", filename );
+end
+
+
+function  test_far_points( P, rad )
+    far = r_far(WPoints( Points( P ) ), rad );
+
+    N = Polygon2F();
+    for  i ∈ eachindex( P )
+        if  ( far[ i ] )
+             push!( N, P[ i ] );
+        end
+    end
+
+    draw_two_sets( P, N, "out/far_points.pdf" );
+end
+
+
+function  test_packing( P, rad )
+    net = packing( Points( P ), rad );
+
+    N = Polygon2F();
+    for  i ∈ net
+        push!( N, P[ i ] );
+    end
+
+    draw_two_sets( P, N, "out/net.pdf" );
+end
+
+
+
+function     test_smallest_ball( P, k )
+    cen, rad = smallest_k_ball( Points( P ), k );
+
+    c,cr,_ = cairo_setup( "out/smallest_disk.pdf", [P], true );
+
+    set_source_rgb(cr, 0.8, 1.0, 0.2) # An nice red color
+    Cairo.arc(cr, cen[1], cen[2], rad, 0, 2*pi)
+    Cairo.fill(cr)
+    Cairo.stroke( cr );
+
+    n = length( P );
+    set_source_rgb(cr, 0.8, 0.2, 0.2) # An nice red color
+    draw_points( cr, Points( P ), 0.1/(sqrt(n)) );
+    Cairo.stroke( cr );
+    finish( c );
+end
 
 function (@main)(ARGS)
     if  length( ARGS ) != 2
@@ -267,35 +470,17 @@ function (@main)(ARGS)
 
     println( "n: ", n );
     println( "rad: ", rad );
-    force_compile();
 
     println( "\n\n--------------------\n\n" );
     println( "Generating input & Copying..." );
     P = Polygon_random_gaussian( D,Float64, n );
 
-    net = r_far(Points( P ), rad );
+    test_far_points( P, rad );
+    test_packing( P, rad );
 
-    # Output to file...
-    c,cr,bb = cairo_setup( "out.pdf", [P], true );
-
-    N = Polygon2F();
-    for  i ∈ net
-        #println( "i: ", i );
-        push!( N, P[ i ] );
-    end
-
-    println( "LEN: ", length( P ) );
-    println( "N LEN: ", length( N ) );
-    set_source_rgb(cr, 0.8, 0.2, 0.2) # An nice red color
-    draw_points( cr, Points( N ), 0.3/(sqrt(n)) );
-    Cairo.stroke( cr );
+    test_smallest_ball( P, 10 )
 
 
-    set_source_rgb(cr, 1.0, 0.0, 0.8);
-    draw_points( cr, Points( P ), 1/(16*sqrt(n)) );
-    Cairo.stroke( cr );
-
-    finish( c );
 
     return  0;
 end
