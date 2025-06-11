@@ -2,7 +2,7 @@
 
 
 ########################################################################
-# Computes a packing (i.e., a net) of n points in constant dim in
+# Computes a packing (i.e., a net) of n points in constant deciderim in
 # linear time using hashing, based on Har-Peled and Raichel Net &
 # Prune paper.
 #
@@ -116,11 +116,61 @@ end
 # open hashing - probably a terrible idea.
 ######################################################################
 
+"""
+GGrid
+
+Generic grid type - every cell stores one value of type VT.
+"""
+mutable struct GGrid{D,VT}
+    ℓ::Float64  # Side length
+    cells::Dict{Point{D,Int},VT}
+end
+
+function  GGrid_init( ℓ, D, VT )
+    return   GGrid{D,VT}( ℓ, Dict{Point{D,Int},VT}() );
+end
+
+function  GGrid_store( G::GGrid{D,VT}, trg::Point{D,Int}, v::VT )  where{D,VT}
+    G.cells[ trg ] = v;
+end
+
+function  GGrid_store( G::GGrid{D,VT}, p::Point{D,T}, v::VT )  where{D,T,VT}
+    G.cells[ gid( p, G.ℓ) ] = v;
+end
+
+function  GGrid_store( G::GGrid{D,VT}, pnts::WPoints{D,T}, v::VT )  where{D,T,VT}
+    for p ∈ pnts
+        G.cells[ gid( p, G.ℓ) ] = v;
+    end
+end
+
+
+function  GGrid_add_shadow( G::GGrid{D,VT}, p::Point{D,T}, v::VT, nbr )  where{D,T,VT}
+    base = gid( p, G.ℓ );
+    for  diff ∈ nbr
+        trg = base + diff;
+        sum = zero( VT );
+        if  haskey( G.cells, trg )
+            sum = G.cells[ trg ]
+        end
+
+        G.cells[ trg ] = sum + v;
+    end
+end
+
+
+function  GGrid_add_shadow( G::GGrid{D,VT}, P::WPoints{D,T}, nbr )  where{D,T,VT}
+    for i ∈ 1:length( P )
+        GGrid_add_shadow( G, P[i], weight( P, i ), nbr );
+    end
+end
+
+
 
 mutable struct WGrid{D,T}
-    P::WPoints{D,T}
     ℓ::Float64  # Side length
     cells::Dict{Point{D,Int},Vector{Int}}
+    P::WPoints{D,T}
 end
 
 
@@ -141,7 +191,7 @@ end
 function   WGrid_init( Ground::WPoints{D,T}, ℓ::T )::WGrid{D,T}  where{D,T}
     dict = Dict{Point{D,Int},Vector{Int}}();
 
-    return  WGrid( WPoints_empty( Ground ), ℓ, dict );
+    return  WGrid( ℓ, dict, WPoints_empty( Ground ) );
 end
 
 function   packing_add_point( G::WGrid{D,T}, loc::Int, rad::T,
@@ -358,34 +408,137 @@ function   min_ball( P::Vector{Point{D,T}}, i, k ) where {D,T}
     return  cen, d;
 end
 
+function   min_ball( P::Vector{Point{D,T}}, cen::Point{D,T}, k ) where {D,T}
+    arr = [Dist(cen, q) for q ∈ P ];
+    d = partialsort!( arr, k )
+
+    return  cen, d;
+end
+
+############################################################################
+# Grid packing are similar to packing, except that the only constraint
+# is that any grid cell has only a single point in the packing. No
+# need to check the neighborhood.
+
+function  GridPacking_compute( P::WPoints{D,T}, ℓ::Float64 ) where{D,T}
+    G = WGrid_init( P, ℓ );
+
+    for i ∈ 1:length(P)
+        trg = gid( P[ i ], G.ℓ )
+        if  ! haskey( G.cells, trg )
+            add_point!( G.P, oindex( P, i ), weight( P, i ) )
+            store_value!( G.cells, trg, length( G.P ) );
+            continue;
+        end
+        list = G.cells[ trg ]
+        @assert( length( list ) == 1 );
+        ind_p = list[ 1 ]
+        G.P.W[ ind_p ] += weight( P, i );
+    end
+end
+
+
 
 ############################################################################
 ############################################################################
-function   smallest_k_ball( _P::Vector{Point{D,T}}, k::Int ) where{D,T}
+"""
+    decider_k_ball
+
+# Returned value
+  -1 : opt < r
+   0 : opt ∈ [r, (1+ε)r]
+  +1 : opt > (1+ε)r.
+"""
+function   decider_k_ball( P::WPoints{D,T}, k::Int, ε::Float64, r::Float64
+                         ) where{D,T}
+    ℓ = (r/sqrt(D)) * ε / 2.0;
+    GS = GGrid_init( ℓ, D, Int );
+    nbr = grid_neighberhood( zero(Point{D,Int}), r, ℓ );
+
+    GGrid_add_shadow( GS, P, nbr );
+    for  (cell, val) ∈ GS.cells
+        if  val < k
+            continue
+        end
+        p = Point{D,T}( cell )
+        #println( "PPP : ", p );
+        p = ℓ * p;
+        #println( "PPPX: ", p );
+        return  -1, p;
+    end
+    return  1, zero( Point{D,T} );
+end
+
+
+function  throw_far_points( P::WPoints{D,T}, r::Float64 )where{D,T}
+    far = r_far( P, r );
+    near = .!far;
+    if ( sum( near ) < length( P ) )
+        return   subset( P, near );
+    end
+    return  P;
+end
+
+function smallest_k_ball_binary_search( _P::Vector{Point{D,T}}, k, r, R, ε
+                                      )where{D,T}
+    VP = WPoints( _P );
+    P = packing( VP, ε * r / 4 );
+
+    cen = zero( Point{D,T} );
+    iter = 0;
+
+    f_assigned = false;
+    while  ( (1+ε)*r < R )  ||  ( iter == 0 )
+        iter += 1;
+        δ = min( max(  ((R / r ) - 1.0) / 8.0, ε / 4.0 ), 0.5 );
+#        if  δ > 1.0
+#            δ = 0.5
+#        end
+        mid = ( r + R ) / 2.0
+        res, px = decider_k_ball( P, k, δ, mid );
+        if  ( res < 0 )
+            f_assigned = true;
+            cen = px;
+            R = mid;
+            continue;
+        end
+        r = mid;
+    end
+
+    if  ! f_assigned
+ #       println( "Had to force check..." );
+        res, cen = decider_k_ball( P, k, ε, R );
+ #       println( "RES= ", res );
+        @assert( res < 0 );
+    end
+    return  min_ball( _P, cen, k );
+end
+
+function   smallest_k_ball( _P::Vector{Point{D,T}}, k::Int, ε::Float64 ) where{D,T}
     P = WPoints( _P );
 
     while  true
         _, _, dist = random_nn_dist( P );
 
+        res, _ = decider_k_ball( P, k, 1.0, dist );
+
+        # Found ball ⟹ Prune: throw away the far points...
+        if  ( res < 0 )
+            P = throw_far_points( P, dist );
+            continue;
+        end
+
+        res4, _ = decider_k_ball( P, k, 1.0, 4*dist );
+
+        # Found ball ⟹ optimal solution radius around [r,4r]
+        if  ( res4 < 0 )
+            return  smallest_k_ball_binary_search( _P, k, dist / 8, 8*dist, ε );
+        end
+
+        # Packing (well, net in the original paper)
         N = packing( P, dist );
         mw = max_weight( N )[ 2 ]
-
-        # If there is a packing point with weight ≥ k, then we can
-        # throw away the far points
-        if  ( mw >= k )
-            far = r_far( P, dist );
-            near = .!far;
-            if ( sum( near ) < length( P ) )
-                P = subset( P, near );
-                continue;
-            end
-        end
-
-        N_4 = packing( P, 4*dist );
-        ind, mw_4 = max_weight( N_4 )
-        if  ( mw_4 >= k )
-            return  min_ball( _P, oindex( P, ind ), k );
-        end
+        @assert( mw < k );
 
         P = N;
     end
@@ -441,12 +594,19 @@ end
 
 
 function     test_smallest_ball( P, k )
-    cen, rad = smallest_k_ball( Points( P ), k );
+    cen_b, rad_b = smallest_k_ball( Points( P ), k, 0.5 );
+    cen_c, rad_c = smallest_k_ball( Points( P ), k, 0.125 );
 
-    c,cr,_ = cairo_setup( "out/smallest_disk.pdf", [P], true );
+    filename = "out/smallest_disk.pdf";
+    c,cr,_ = cairo_setup( filename, [P], true );
 
-    set_source_rgb(cr, 0.8, 1.0, 0.2) # An nice red color
-    Cairo.arc(cr, cen[1], cen[2], rad, 0, 2*pi)
+    set_source_rgba(cr, 0.0, 0.0, 1.0, 0.3) # An nice red color
+    Cairo.arc(cr, cen_b[1], cen_b[2], rad_b, 0, 2*pi)
+    Cairo.fill(cr)
+    Cairo.stroke( cr );
+
+    set_source_rgba(cr, 0.0, 0.0, 0.0, 0.3) # An nice red color
+    Cairo.arc(cr, cen_c[1], cen_c[2], rad_c, 0, 2*pi)
     Cairo.fill(cr)
     Cairo.stroke( cr );
 
@@ -455,6 +615,8 @@ function     test_smallest_ball( P, k )
     draw_points( cr, Points( P ), 0.1/(sqrt(n)) );
     Cairo.stroke( cr );
     finish( c );
+
+    println( "     Created: ", filename );
 end
 
 function (@main)(ARGS)
@@ -478,7 +640,14 @@ function (@main)(ARGS)
     test_far_points( P, rad );
     test_packing( P, rad );
 
-    test_smallest_ball( P, 10 )
+    k = 20 #div( length( P ), 2);
+    k_a = div(k, 3)
+    base = npoint( 2.5, 1.5 );
+    for i ∈ 1:k_a
+        p = Point_random( D, Float64 );
+        push!( P, base + p*0.1 );
+    end
+    test_smallest_ball( P, k )
 
 
 
