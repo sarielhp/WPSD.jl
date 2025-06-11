@@ -135,7 +135,7 @@ function  closest_pair_add_point( G::GridType{D,T}, loc::Int ) where{D,T}
         G.cp_dist = min_dist;
     end
 
-    if  G.f_regrid  
+    if  G.f_regrid
         #println( "REGRID!" );
         G = grid_init( G.P, G.cp_dist, 1:loc, G.cp );
     end
@@ -357,7 +357,7 @@ function (@main)(ARGS)
         t_brute = @timed sol_bf = closest_pair_brute_force( PB );
         @printf( "Time brute         : %10.5f\n", t_brute.time );
     end
-    
+
     t_rand    = @timed G      = closest_pair( PC );
     @printf( "Time Rand          : %10.5f\n", t_rand.time );
 
