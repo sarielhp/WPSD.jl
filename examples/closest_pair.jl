@@ -92,7 +92,7 @@ function   grid_init( P::Vector{Point{D,T}}, ℓ::T,
     dict = Dict{Point{D,Int},Vector{Int}}();
     sizehint!( dict, min( length( r ), length( P ) ) )
     G = GridType( P, ℓ, dict, cp, ℓ, false,
-                  Point{D,Int}( fill( 1, D ) ), MVector{D,Int}(undef ) );
+                  Point{D,Int}( fill( 1, D ) ) );
 
     for  i ∈ r
         trg = gid(P[i], ℓ )

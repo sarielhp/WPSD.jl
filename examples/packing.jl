@@ -337,6 +337,8 @@ function  r_far( P::WPoints{D,T}, rad::T ) where{D,T}
     return  far;
 end
 
+
+
 ############################################################################
 ############################################################################
 
@@ -398,6 +400,44 @@ function  subset( P::WPoints{D,T}, keep ) where {D,T}
     return  O;
 end
 
+
+###########################################################################
+###########################################################################
+# Code to compute the closest pair, using the
+# algorithm described by net & prune.
+###########################################################################
+###########################################################################
+
+function  net_prune_closest_pair( _P::Vector{Point{D,T}} ) where {D,T}
+    P = WPoints( _P );
+
+    while  length( P ) > 5
+        println( length( P ) );
+        _, _, dist_a = random_nn_dist( P )
+        _, _, dist_b = random_nn_dist( P )
+        P = throw_far_points( P, min( dist_a, dist_b ) );
+    end
+    n = length( P )
+    d = Dist( P[1], P[2] );
+    for  i ∈ 1:n-1
+        for j ∈ i+1:n
+            d_x = Dist( P[ i ], P[ j ] );
+            if  d_x < d
+                d = d_x;
+            end
+        end
+    end
+
+    return d;
+end
+
+
+###########################################################################
+###########################################################################
+# Code to approximate the smallest ball containing k points, using the
+# algorithm described by net & prune.
+###########################################################################
+###########################################################################
 
 function   min_ball( P::Vector{Point{D,T}}, i, k ) where {D,T}
     cen = P[ i ];
@@ -481,6 +521,7 @@ end
 
 function smallest_k_ball_binary_search( _P::Vector{Point{D,T}}, k, r, R, ε
                                       )where{D,T}
+    println( "Entering binary search..." );
     VP = WPoints( _P );
     P = packing( VP, ε * r / 4 );
 
@@ -491,6 +532,7 @@ function smallest_k_ball_binary_search( _P::Vector{Point{D,T}}, k, r, R, ε
     while  ( (1+ε)*r < R )  ||  ( iter == 0 )
         iter += 1;
         δ = min( max(  ((R / r ) - 1.0) / 8.0, ε / 4.0 ), 0.5 );
+        println( iter," : [", r, ", ", R, "]  δ: ", δ );
 #        if  δ > 1.0
 #            δ = 0.5
 #        end
@@ -519,7 +561,9 @@ function   smallest_k_ball( _P::Vector{Point{D,T}}, k::Int, ε::Float64 ) where{
 
     while  true
         _, _, dist = random_nn_dist( P );
+        println( "Dist: ", dist, "   |P| = ", length( P ) );
 
+        println( "dist packing: ", dist );
         res, _ = decider_k_ball( P, k, 1.0, dist );
 
         # Found ball ⟹ Prune: throw away the far points...
@@ -527,7 +571,7 @@ function   smallest_k_ball( _P::Vector{Point{D,T}}, k::Int, ε::Float64 ) where{
             P = throw_far_points( P, dist );
             continue;
         end
-
+        println( "4*dist packing: ", 4*dist );
         res4, _ = decider_k_ball( P, k, 1.0, 4*dist );
 
         # Found ball ⟹ optimal solution radius around [r,4r]
@@ -535,8 +579,10 @@ function   smallest_k_ball( _P::Vector{Point{D,T}}, k::Int, ε::Float64 ) where{
             return  smallest_k_ball_binary_search( _P, k, dist / 8, 8*dist, ε );
         end
 
+        println( "Packing the point set..." );
         # Packing (well, net in the original paper)
         N = packing( P, dist );
+        println( "Packing computed..." );
         mw = max_weight( N )[ 2 ]
         @assert( mw < k );
 
@@ -635,19 +681,14 @@ function (@main)(ARGS)
 
     println( "\n\n--------------------\n\n" );
     println( "Generating input & Copying..." );
-    P = Polygon_random_gaussian( D,Float64, n );
+    #P = Polygon_random_gaussian( D,Float64, n );
+    P = Polygon_random( D,Float64, n );
 
-    test_far_points( P, rad );
-    test_packing( P, rad );
-
-    k = 20 #div( length( P ), 2);
-    k_a = div(k, 3)
-    base = npoint( 2.5, 1.5 );
-    for i ∈ 1:k_a
-        p = Point_random( D, Float64 );
-        push!( P, base + p*0.1 );
-    end
-    test_smallest_ball( P, k )
+    #test_far_points( P, rad );
+    #test_packing( P, rad );
+    test_smallest_ball( P, 20 )
+    
+    #net_prune_closest_pair( Points( P ) );
 
 
 
